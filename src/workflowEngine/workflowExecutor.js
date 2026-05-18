@@ -27,7 +27,8 @@ function createWorkflowExecutor(nodeRunner) {
                 MAX_WORKFLOW_TIMEOUT_MS,
             );
         } catch (err) {
-            return buildResult({ executionId, def, context, nodeStates, startedAt, status: 'FAILED', error: err });
+            const status = err?.code === 'STUCK' ? 'STUCK' : 'FAILED';
+            return buildResult({ executionId, def, context, nodeStates, startedAt, status, error: err });
         }
 
         return buildResult({ executionId, def, context, nodeStates, startedAt, status: 'SUCCESS' });
@@ -117,9 +118,20 @@ async function executeSingleNode(node, context, nodeStates, runNode) {
         context[node.id] = output;
         nodeStates.set(node.id, transition(nodeStates.get(node.id), ACTIONS.SUCCEED));
     } catch (err) {
-        nodeStates.set(node.id, transition(nodeStates.get(node.id), ACTIONS.FAIL));
+        const action = pickFailAction(err);
+        nodeStates.set(node.id, transition(nodeStates.get(node.id), action));
         throw err;
     }
+}
+
+function pickFailAction(err) {
+    if (err?.code === 'STUCK') {
+        return ACTIONS.STUCK;
+    }
+    if (err?.code === 'TIMEOUT') {
+        return ACTIONS.TIMEOUT;
+    }
+    return ACTIONS.FAIL;
 }
 
 function withWorkflowTimeout(fn, ms) {

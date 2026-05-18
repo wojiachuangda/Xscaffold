@@ -47,22 +47,34 @@ function buildWorkflowRouter(deps) {
     return router;
 }
 
-function registerWorker({ queue, executor, executionStore, workflowRegistry }) {
-    queue.process(WORKFLOW_QUEUE, async (payload) => runOne(payload, { executor, executionStore, workflowRegistry }));
+function registerWorker(deps) {
+    deps.queue.process(WORKFLOW_QUEUE, async (payload) => runOne(payload, deps));
 }
 
-async function runOne({ workflowId, executionId, input }, { executor, executionStore, workflowRegistry }) {
-    executionStore.markRunning(executionId);
-    const def = workflowRegistry.get(workflowId);
-    const result = await executor.execute(def, input || {});
-    const finalStatus = result.status === 'SUCCESS' ? 'SUCCESS' : 'FAILED';
-    executionStore.markFinal(executionId, {
-        status: finalStatus,
+async function runOne(payload, deps) {
+    const { workflowId, executionId, input, sessionId } = payload;
+    deps.executionStore.markRunning(executionId);
+    const def = deps.workflowRegistry.get(workflowId);
+    const ctx = { ...(input || {}), executionId };
+    if (sessionId) {
+        ctx.sessionId = sessionId;
+    }
+    const result = await deps.executor.execute(def, ctx);
+    deps.executionStore.markFinal(executionId, {
+        status: result.status,
         result: result.status === 'SUCCESS' ? result.context : null,
         error: result.error,
         durationMs: result.durationMs,
     });
-    return { executionId, finalStatus };
+    recordWorkflowMetrics(deps.metricsExporter, def.name, result);
+    return { executionId, finalStatus: result.status };
+}
+
+function recordWorkflowMetrics(metricsExporter, workflowName, result) {
+    if (!metricsExporter) {
+        return;
+    }
+    metricsExporter.recordWorkflowDuration(workflowName, result.status, result.durationMs);
 }
 
 async function triggerExecute(req, res, deps) {

@@ -1,4 +1,4 @@
-// [scaffold] ID: T1.6+T4.x | Date: 2026-05-18 | Description: Express 应用工厂——装配中间件、路由、错误处理与健康检查
+// [scaffold] ID: T1.6+T4.x+T5.x | Date: 2026-05-18 | Description: Express 应用工厂——装配中间件、路由、错误处理、可观测性
 'use strict';
 
 const express = require('express');
@@ -14,6 +14,7 @@ const { buildRepository } = require('../agentManager/agentRepository');
 
 const { buildWorkflowRouter } = require('./controllers/workflowController');
 const { buildWebhookRouter } = require('./controllers/webhookController');
+const { buildExecutionTraceRouter, buildMetricsRouter } = require('./controllers/observabilityController');
 
 const { createInMemoryAdapter } = require('../infrastructure/queue/inMemoryAdapter');
 const { createWorkflowRegistry } = require('../workflowEngine/workflowRegistry');
@@ -23,33 +24,56 @@ const { createWorkflowExecutor } = require('../workflowEngine/workflowExecutor')
 const { createRegistry } = require('../toolRegistry/toolRegistry');
 const { registerBuiltins } = require('../toolRegistry/builtinTools');
 
-/**
- * 创建 Express 应用（测试可注入 overrides 中的任意依赖）
- */
+const { buildMemoryRepository } = require('../memoryManager/memoryRepository');
+const { buildMemoryStore } = require('../memoryManager/memoryStore');
+const { buildIoorRepository } = require('../observability/ioorRepository');
+const { buildTraceRepository } = require('../observability/traceRepository');
+const { buildAuditRepository } = require('../domain/audit/auditRepository');
+const { createIoorRecorder } = require('../observability/ioorRecorder');
+const { createTraceCollector } = require('../observability/traceCollector');
+const { createMetricsExporter } = require('../observability/metricsExporter');
+
 function createApp(overrides = {}) {
     const app = express();
     app.disable('x-powered-by');
-
     const deps = buildDependencies(overrides);
     mountHealthAndWebhooks(app, deps, overrides);
+    mountMetricsEndpoint(app, deps, overrides);
     mountProtectedRoutes(app, deps, overrides);
-
     app.use(notFoundHandler);
     app.use(errorHandler);
     return app;
 }
 
 function buildDependencies(overrides) {
-    const agentRepository = overrides.agentRepository || buildRepository(overrides.db);
-    const agentService = overrides.agentService || buildService(agentRepository);
+    const agentService =
+        overrides.agentService || buildService(overrides.agentRepository || buildRepository(overrides.db));
     const toolRegistry = overrides.toolRegistry || buildToolRegistry();
     const llmClient = overrides.llmClient || stubLLMClient();
-    const nodeRunner = overrides.nodeRunner || createNodeRunner({ toolRegistry, agentService, llmClient });
-    const executor = overrides.executor || createWorkflowExecutor(nodeRunner);
-    const workflowRegistry = overrides.workflowRegistry || createWorkflowRegistry();
-    const executionStore = overrides.executionStore || buildExecutionStore(overrides.db);
-    const queue = overrides.queue || createInMemoryAdapter();
-    return { agentService, workflowRegistry, executionStore, queue, executor };
+    const memoryStore = overrides.memoryStore || buildMemoryStore(buildMemoryRepository(overrides.db));
+    const ioorRecorder = overrides.ioorRecorder || buildDefaultIoorRecorder(overrides.db);
+    const traceCollector =
+        overrides.traceCollector || createTraceCollector({ traceRepository: buildTraceRepository(overrides.db) });
+    const metricsExporter = overrides.metricsExporter || createMetricsExporter();
+    const nodeRunner =
+        overrides.nodeRunner || createNodeRunner({ toolRegistry, agentService, llmClient, memoryStore, ioorRecorder });
+    return {
+        agentService,
+        workflowRegistry: overrides.workflowRegistry || createWorkflowRegistry(),
+        executionStore: overrides.executionStore || buildExecutionStore(overrides.db),
+        queue: overrides.queue || createInMemoryAdapter(),
+        executor: overrides.executor || createWorkflowExecutor(nodeRunner),
+        ioorRepository: overrides.ioorRepository || buildIoorRepository(overrides.db),
+        traceCollector,
+        metricsExporter,
+    };
+}
+
+function buildDefaultIoorRecorder(db) {
+    return createIoorRecorder({
+        ioorRepository: buildIoorRepository(db),
+        auditRepository: buildAuditRepository(db),
+    });
 }
 
 function buildToolRegistry() {
@@ -84,6 +108,11 @@ function mountHealthAndWebhooks(app, deps, overrides) {
     }
 }
 
+function mountMetricsEndpoint(app, deps, overrides) {
+    const metricsToken = overrides.metricsToken ?? process.env.METRICS_TOKEN;
+    app.use('/metrics', buildMetricsRouter({ metricsExporter: deps.metricsExporter, metricsToken }));
+}
+
 function mountProtectedRoutes(app, deps, overrides) {
     const authMiddleware =
         overrides.authMiddleware ||
@@ -99,12 +128,21 @@ function mountProtectedRoutes(app, deps, overrides) {
 
     app.use('/agents', buildAgentRouter(deps.agentService));
     app.use(
+        '/workflows/executions',
+        buildExecutionTraceRouter({
+            executionStore: deps.executionStore,
+            ioorRepository: deps.ioorRepository,
+            traceCollector: deps.traceCollector,
+        }),
+    );
+    app.use(
         '/workflows',
         buildWorkflowRouter({
             workflowRegistry: deps.workflowRegistry,
             executionStore: deps.executionStore,
             queue: deps.queue,
             executor: deps.executor,
+            metricsExporter: deps.metricsExporter,
         }),
     );
 }

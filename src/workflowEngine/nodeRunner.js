@@ -1,14 +1,19 @@
-// [scaffold] ID: T2.6 | Date: 2026-05-18 | Description: 节点执行器（agent/tool/condition/code）+ 超时与指数退避重试
+// [scaffold] ID: T2.6+T5.x | Date: 2026-05-18 | Description: 节点执行器：四类节点 + 超时/重试 + 记忆/IOOR/自愈/trace 集成
 'use strict';
 
 const { renderTemplate, evaluateBoolean } = require('./expressionEvaluator');
+const { runWithSelfHealing } = require('./selfHealing');
 const { TimeoutError, AppError, ValidationError } = require('../infrastructure/errors/AppError');
+const { computeProfileHash } = require('../observability/profileHash');
 
 const DEFAULT_NODE_TIMEOUT_MS = Number(process.env.MAX_WORKFLOW_TIMEOUT_MS) || 30000;
 
-/**
- * @param {object} deps  注入运行时依赖：{ toolRegistry, agentService, llmClient }
- */
+class StuckError extends AppError {
+    constructor(message, details) {
+        super(message, { code: 'STUCK', status: 500, details });
+    }
+}
+
 function createNodeRunner(deps) {
     const runners = {
         agent: (node, ctx) => runAgentNode(node, ctx, deps),
@@ -25,7 +30,7 @@ function createNodeRunner(deps) {
         return runWithRetry(node, () => withTimeout(runner(node, ctx), nodeTimeoutMs(node), node.id));
     }
 
-    return { runNode };
+    return { runNode, StuckError };
 }
 
 function nodeTimeoutMs(node) {
@@ -40,7 +45,8 @@ async function runWithRetry(node, fn) {
             return await fn();
         } catch (err) {
             lastError = err;
-            if (attempt >= policy.maxAttempts) {
+            // STUCK 不应被重试（业务永久失败）
+            if (err.code === 'STUCK' || attempt >= policy.maxAttempts) {
                 throw err;
             }
             await sleep(policy.backoffMs * 2 ** (attempt - 1));
@@ -65,22 +71,104 @@ function sleep(ms) {
     });
 }
 
-async function runAgentNode(node, ctx, { agentService, llmClient }) {
+async function runAgentNode(node, ctx, deps) {
+    const { agentService, llmClient } = deps;
     if (!agentService || !llmClient) {
         throw new AppError('runAgentNode 缺少依赖: agentService / llmClient');
     }
     const agent = agentService.getAgentById(node.agentId);
     const userPrompt = resolveInput(node.input, ctx);
-    const result = await llmClient.chat({
-        model: agent.model,
-        messages: [{ role: 'user', content: userPrompt }],
+    const baseMessages = buildLLMMessages(agent, userPrompt, ctx, deps);
+    const healed = await invokeLLMWithHealing(agent, baseMessages, llmClient);
+    recordAgentTurns({ agent, baseMessages, healed, node, ctx, deps });
+    if (!healed.ok) {
+        throw new StuckError(`Agent 自愈耗尽: ${node.id}`, { reason: healed.reason });
+    }
+    persistMemory({ agent, userPrompt, healed, ctx, deps });
+    return buildAgentOutput(agent, healed);
+}
+
+function buildLLMMessages(agent, userPrompt, ctx, deps) {
+    const history = pullHistory(ctx, deps);
+    return [...history, { role: 'user', content: userPrompt }];
+}
+
+function pullHistory(ctx, deps) {
+    if (!deps.memoryStore || !ctx.sessionId) {
+        return [];
+    }
+    const items = deps.memoryStore.getHistory({ sessionId: ctx.sessionId });
+    return items.map((m) => ({ role: m.role, content: m.content }));
+}
+
+async function invokeLLMWithHealing(agent, baseMessages, llmClient) {
+    return runWithSelfHealing({
+        callLLM: async (extra) => {
+            const messages = extra ? [...baseMessages, { role: 'system', content: extra }] : baseMessages;
+            return llmClient.chat({ model: agent.model, messages });
+        },
     });
+}
+
+function recordAgentTurns({ agent, baseMessages, healed, node, ctx, deps }) {
+    if (!deps.ioorRecorder || !ctx.executionId) {
+        return;
+    }
+    const turnIndex = bumpTurnCounter(ctx);
+    deps.ioorRecorder.record({
+        executionId: ctx.executionId,
+        nodeId: node.id,
+        turnIndex,
+        agentId: agent.id,
+        profileHash: computeProfileHash(agent),
+        modelProvider: 'openai',
+        modelName: agent.model,
+        input: { messages: baseMessages },
+        output: healed.result
+            ? { content: healed.result.content, reasoning_content: healed.result.reasoning_content }
+            : null,
+        toolCalls: [],
+        observations: [],
+        tokenUsage: healed.result?.tokenUsage ?? null,
+        latencyMs: healed.result?.latencyMs ?? null,
+    });
+}
+
+function bumpTurnCounter(ctx) {
+    if (typeof ctx._turnCounter !== 'number') {
+        Object.defineProperty(ctx, '_turnCounter', { value: 0, writable: true, enumerable: false });
+    }
+    const next = ctx._turnCounter;
+    ctx._turnCounter += 1;
+    return next;
+}
+
+function persistMemory({ agent, userPrompt, healed, ctx, deps }) {
+    if (!deps.memoryStore || !ctx.sessionId || !healed.ok) {
+        return;
+    }
+    deps.memoryStore.saveMessage({
+        sessionId: ctx.sessionId,
+        role: 'user',
+        content: userPrompt,
+        metadata: { agentId: agent.id },
+    });
+    deps.memoryStore.saveMessage({
+        sessionId: ctx.sessionId,
+        role: 'assistant',
+        content: healed.result.content,
+        metadata: { agentId: agent.id, model: agent.model },
+    });
+}
+
+function buildAgentOutput(agent, healed) {
     return {
         agentId: agent.id,
-        content: result.content,
-        reasoning_content: result.reasoning_content,
-        tokenUsage: result.tokenUsage,
-        latencyMs: result.latencyMs,
+        content: healed.result.content,
+        reasoning_content: healed.result.reasoning_content,
+        tokenUsage: healed.result.tokenUsage,
+        latencyMs: healed.result.latencyMs,
+        attempts: healed.attempts,
     };
 }
 
@@ -98,7 +186,6 @@ async function runConditionNode(node, ctx) {
 }
 
 async function runCodeNode(node, ctx) {
-    // MVP：仅支持 return-only 表达式（VM 沙箱见 V2）
     const rendered = renderTemplate(node.code, ctx);
     return { output: rendered };
 }
@@ -145,4 +232,4 @@ function coerceLiteral(rendered, original) {
     return Number(rendered);
 }
 
-module.exports = { createNodeRunner };
+module.exports = { createNodeRunner, StuckError };
