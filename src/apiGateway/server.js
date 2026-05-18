@@ -95,6 +95,7 @@ function stubLLMClient() {
 
 function mountHealthAndWebhooks(app, deps, overrides) {
     app.get('/healthz', (req, res) => res.json(success({ status: 'ok', uptime: process.uptime() })));
+    app.get('/readyz', (req, res) => handleReadyz(req, res, deps));
     if (overrides.webhookProviders) {
         app.use(
             '/webhooks',
@@ -106,6 +107,19 @@ function mountHealthAndWebhooks(app, deps, overrides) {
             }),
         );
     }
+}
+
+function handleReadyz(req, res, deps) {
+    const checks = { db: false, queue: false };
+    try {
+        deps.executionStore.findById('exec_readyz_probe');
+        checks.db = true;
+    } catch {
+        checks.db = false;
+    }
+    checks.queue = typeof deps.queue?.enqueue === 'function';
+    const ok = Object.values(checks).every(Boolean);
+    res.status(ok ? 200 : 503).json(success({ status: ok ? 'ready' : 'not_ready', checks }));
 }
 
 function mountMetricsEndpoint(app, deps, overrides) {
