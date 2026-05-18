@@ -11,7 +11,12 @@ const { buildRepository } = require('../../src/agentManager/agentRepository');
 function bootApp() {
     const db = new Database(':memory:');
     migrate({ db });
-    const app = createApp({ agentRepository: buildRepository(db) });
+    const app = createApp({
+        agentRepository: buildRepository(db),
+        db,
+        authDisabled: true,
+        rateLimitBypass: true,
+    });
     return { app, db };
 }
 

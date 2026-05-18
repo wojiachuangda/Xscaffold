@@ -1,7 +1,7 @@
 # 🧭 AA-SEAC 实时项目文件拓扑树 (自动生成版)
 
 > **注意**：本文件由底层巡检工具 `pureTreeGenerator.js` 自动生成并覆盖刷新。请勿手动修改本文件。
-> **最新刷新时间**：`2026-05-18 12:55:55`
+> **最新刷新时间**：`2026-05-18 13:47:54`
 
 ```text
 src/
@@ -11,10 +11,16 @@ src/
 │   ├── agentSchema.js                   # 职责: Agent 实体 Zod Schema（AA-SEAC §3 约束 2 入参强校验、§4.1 代码即契约）
 │   └── agentService.js                  # 职责: Agent 业务编排层（严禁直接调 SQL；依赖 repository 抽象）
 ├── apiGateway/
+│   ├── controllers/
+│   │   ├── webhookController.js             # 职责: Webhook 路由——签名校验后入队触发工作流
+│   │   └── workflowController.js            # 职责: 工作流路由控制器（POST execute 202 异步 + GET status）
 │   ├── middlewares/
 │   │   ├── asyncHandler.js                  # 职责: 异步路由处理器包装——自动 catch 异常转发给全局错误中间件
+│   │   ├── authMiddleware.js                # 职责: JWT 认证中间件（含豁免白名单与开发期总开关）
 │   │   ├── errorHandler.js                  # 职责: Express 全局错误中间件——将异常归一化为统一响应契约
-│   │   └── validateMiddleware.js            # 职责: 通用 Zod 入参校验中间件（AA-SEAC §3 约束 2）
+│   │   ├── rateLimiter.js                   # 职责: 滑动窗口内存限流中间件（IP/sub 双粒度，超限返回 429+Retry-After）
+│   │   ├── validateMiddleware.js            # 职责: 通用 Zod 入参校验中间件（AA-SEAC §3 约束 2）
+│   │   └── webhookSignature.js              # 职责: Webhook 签名验证（GitHub HMAC-SHA256，时间窗口防重放）
 │   ├── response/
 │   │   └── envelope.js                      # 职责: 统一 API 响应契约 { success, data, error, meta } 的构造函数
 │   └── server.js                        # 职责: Express 应用工厂——装配中间件、路由、错误处理与健康检查
@@ -27,11 +33,14 @@ src/
 │   │   ├── connection.js                    # 职责: SQLite 连接抽象与单例管理（AA-SEAC §3 约束 4 依赖倒置）
 │   │   ├── migrate.js                       # 职责: 简化迁移引擎——顺序执行 migrations/*.sql，落表 schema_migrations
 │   │   └── migrations/
-│   │       └── 001_create_agents.sql            # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │       ├── 001_create_agents.sql            # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │       └── 002_create_executions.sql        # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
 │   ├── errors/
 │   │   └── AppError.js                      # 职责: 应用统一错误基类与典型子类（AA-SEAC §3 约束 1 统一响应契约）
-│   └── llmClient/
-│       └── openaiClient.js                  # 职责: OpenAI 兼容 Chat Completion 客户端（IOOR 元数据抓取 + 重试 + 超时）
+│   ├── llmClient/
+│   │   └── openaiClient.js                  # 职责: OpenAI 兼容 Chat Completion 客户端（IOOR 元数据抓取 + 重试 + 超时）
+│   └── queue/
+│       └── inMemoryAdapter.js               # 职责: 内存队列适配器（MVP 默认）——单进程异步任务派发
 ├── main.js                          # 职责: 应用入口（启动 Express 服务，装配中间件与路由）
 ├── observability/
 │   ├── logger.js                        # 职责: Pino logger 封装，集成敏感字段双重脱敏（AA-SEAC §4.5）
@@ -48,10 +57,13 @@ src/
 │   ├── toolRegistry.js                  # 职责: 工具注册中心——注册/查询/执行，含超时与参数校验
 │   └── toolSchema.js                    # 职责: Tool 定义的 Zod Schema（AA-SEAC §4.1 代码即契约）
 └── workflowEngine/
+    ├── executionSchema.js               # 职责: 工作流执行记录契约（AA-SEAC §4.1 代码即契约）
+    ├── executionStore.js                # 职责: 工作流执行记录持久化（Repository 模式，SQL 仅出现此文件）
     ├── expressionEvaluator.js           # 职责: 工作流表达式求值器（{{path}} 模板 + 安全布尔表达式，禁用 JS eval）
     ├── nodeRunner.js                    # 职责: 节点执行器（agent/tool/condition/code）+ 超时与指数退避重试
     ├── taskStateMachine.js              # 职责: 任务状态机（AA-SEAC §3 约束 3：独立纯函数，对外仅暴露 transition）
     ├── workflowExecutor.js              # 职责: 工作流执行器（拓扑遍历 + 条件分支裁剪 + 输出注入 context）
+    ├── workflowRegistry.js              # 职责: 工作流定义注册中心（内存版，可由 YAML 扫描或代码预定义喂入）
     └── workflowSchema.js                # 职责: 工作流 Zod Schema（节点 union + DAG 环检测）
 ```
 
