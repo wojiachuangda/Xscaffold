@@ -5,6 +5,7 @@ const crypto = require('crypto');
 
 const { WorkflowSchema } = require('./workflowSchema');
 const { STATES, ACTIONS, transition } = require('./taskStateMachine');
+const { initQuota } = require('./tokenQuota');
 const { ValidationError, AppError } = require('../infrastructure/errors/AppError');
 
 const MAX_WORKFLOW_TIMEOUT_MS = Number(process.env.MAX_WORKFLOW_TIMEOUT_MS) || 30000;
@@ -17,6 +18,7 @@ function createWorkflowExecutor(nodeRunner) {
         const def = parseDef(workflowDef);
         const executionId = `exec_${crypto.randomBytes(8).toString('hex')}`;
         const context = { ...initialContext };
+        initQuota(context, resolveQuota(def, initialContext));
         const nodeStates = new Map(def.nodes.map((n) => [n.id, STATES.PENDING]));
         const order = topologicalOrder(def);
         const startedAt = Date.now();
@@ -27,7 +29,7 @@ function createWorkflowExecutor(nodeRunner) {
                 MAX_WORKFLOW_TIMEOUT_MS,
             );
         } catch (err) {
-            const status = err?.code === 'STUCK' ? 'STUCK' : 'FAILED';
+            const status = STUCK_CODES.has(err?.code) ? 'STUCK' : 'FAILED';
             return buildResult({ executionId, def, context, nodeStates, startedAt, status, error: err });
         }
 
@@ -35,6 +37,16 @@ function createWorkflowExecutor(nodeRunner) {
     }
 
     return { execute };
+}
+
+function resolveQuota(def, initialContext) {
+    if (Number.isFinite(initialContext?.tokenQuota)) {
+        return initialContext.tokenQuota;
+    }
+    if (Number.isFinite(def?.tokenQuota)) {
+        return def.tokenQuota;
+    }
+    return undefined; // 由 initQuota 取 DEFAULT_QUOTA
 }
 
 function parseDef(workflowDef) {
@@ -124,8 +136,10 @@ async function executeSingleNode(node, context, nodeStates, runNode) {
     }
 }
 
+const STUCK_CODES = new Set(['STUCK', 'TOKEN_QUOTA_EXCEEDED']);
+
 function pickFailAction(err) {
-    if (err?.code === 'STUCK') {
+    if (STUCK_CODES.has(err?.code)) {
         return ACTIONS.STUCK;
     }
     if (err?.code === 'TIMEOUT') {

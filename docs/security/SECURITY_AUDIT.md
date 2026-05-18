@@ -1,7 +1,8 @@
 // [security-reviewer] ID: SEC-001 | Date: 2026-05-18 | Description: MVP 安全审计报告（OWASP Top 10 + AA-SEAC §1.6/§4.5）
 
-# Agentic App Platform — 安全审计报告 (v1.0.0)
+# Agentic App Platform — 安全审计报告 (v1.0.0 + v1.1.0 更新)
 
+> **v1.1.0 更新（2026-05-19）**：SSRF (HIGH) 已修复；Token 配额 (MEDIUM) 已修复。详见 §6
 > 审计范围：commit `4116f97`（含 P0–P5）+ P6 收尾改动
 > 方法：手工 OWASP Top 10（2021）逐项检查 + AA-SEAC 安全红线对照
 > 推荐复审：用户可触发 `/security-review` 技能做独立复核
@@ -183,3 +184,39 @@
 v1.0.0 **可发布**，前提：发布说明中明确披露 SSRF 已知限制 + 推荐运维侧配置 `HTTP_REQUEST_ALLOWED_HOSTS`（V1.1 代码层实现）。
 
 无 CRITICAL 项；HIGH 项是设计取舍而非实现缺陷，可通过运维层临时缓解。
+
+---
+
+## 6. V1.1.0 修复说明 (2026-05-19)
+
+### 6.1 SSRF 修复 (HIGH → ✅ RESOLVED)
+- 新增 `src/toolRegistry/builtinTools/httpGuard.js`：
+  - 协议白名单（仅 http/https），拒绝 `file://` `ftp://` `gopher://`
+  - 拒绝 URL 含 `userinfo`（防 `http://user@evil.com/`）
+  - 拒绝直接 IP 字面量（127.0.0.1 / 10.x / 169.254.x 等）
+  - DNS 解析后逐 IP 校验，覆盖 IPv4 + IPv6 私有/链路本地段
+  - 任一解析地址为私有即拒绝（防多 A 记录混入内网）
+  - 内置 5min DNS 缓存避免重复解析开销
+- 环境变量：
+  - `HTTP_REQUEST_BLOCK_PRIVATE_IPS=false` 关闭守卫（仅开发/测试）
+  - `HTTP_REQUEST_ALLOWED_HOSTS=a.b,c.d` 白名单（hostname 精确匹配，跳过 IP 校验）
+- 28 个单元测试覆盖：协议/userinfo/IP 字面量/DNS 重绑定/白名单/IPv6
+
+### 6.2 Token 配额熔断 (MEDIUM → ✅ RESOLVED)
+- 新增 `src/workflowEngine/tokenQuota.js`：
+  - `initQuota / assertBeforeCall / recordTokens / snapshot` 纯函数接口
+  - cached_prompt_tokens 不计入配额（已折扣）
+  - 超额抛 `TokenQuotaError` (code=`TOKEN_QUOTA_EXCEEDED`) → 节点 STUCK → 工作流 STUCK
+  - 三级优先级：`initialContext.tokenQuota` > `workflowDef.tokenQuota` > `WORKFLOW_TOKEN_QUOTA` env > 默认 100k
+- WorkflowSchema 扩展可选 `tokenQuota` 字段
+- 12 个单元 + 4 个集成测试覆盖
+
+### 6.3 更新后评级
+**CRITICAL: 0 | HIGH: 0 | MEDIUM: 3 | INFO: 3**
+
+剩余 MEDIUM/INFO（计划项）：
+- 插件 sandbox（V2 `isolated-vm`）
+- `/metrics` 默认匿名（已有 `METRICS_TOKEN` 可选鉴权）
+- 插件签名（V2）
+- npm audit 集成 CI（V1.1.1）
+- 插件来源校验（V1.5）

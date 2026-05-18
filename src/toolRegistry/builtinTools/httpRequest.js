@@ -1,7 +1,8 @@
-// [scaffold] ID: T2.2 | Date: 2026-05-18 | Description: 内置工具 httpRequest——基于 Node fetch 的 HTTP 客户端
+// [scaffold] ID: T2.2+V1.1-1 | Date: 2026-05-19 | Description: HTTP 客户端工具，集成 SSRF 守卫
 'use strict';
 
 const { z } = require('zod');
+const { assertSafeUrl } = require('./httpGuard');
 
 const paramsSchema = z
     .object({
@@ -13,6 +14,7 @@ const paramsSchema = z
     .strict();
 
 async function handler(params) {
+    await assertSafeUrl(params.url);
     const init = { method: params.method, headers: params.headers || {} };
     if (params.body !== undefined && params.body !== null && params.method !== 'GET') {
         if (typeof params.body === 'string') {

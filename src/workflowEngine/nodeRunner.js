@@ -3,6 +3,7 @@
 
 const { renderTemplate, evaluateBoolean } = require('./expressionEvaluator');
 const { runWithSelfHealing } = require('./selfHealing');
+const { assertBeforeCall, recordTokens } = require('./tokenQuota');
 const { TimeoutError, AppError, ValidationError } = require('../infrastructure/errors/AppError');
 const { computeProfileHash } = require('../observability/profileHash');
 
@@ -79,7 +80,7 @@ async function runAgentNode(node, ctx, deps) {
     const agent = agentService.getAgentById(node.agentId);
     const userPrompt = resolveInput(node.input, ctx);
     const baseMessages = buildLLMMessages(agent, userPrompt, ctx, deps);
-    const healed = await invokeLLMWithHealing(agent, baseMessages, llmClient);
+    const healed = await invokeLLMWithHealing(agent, baseMessages, llmClient, ctx);
     recordAgentTurns({ agent, baseMessages, healed, node, ctx, deps });
     if (!healed.ok) {
         throw new StuckError(`Agent 自愈耗尽: ${node.id}`, { reason: healed.reason });
@@ -101,11 +102,14 @@ function pullHistory(ctx, deps) {
     return items.map((m) => ({ role: m.role, content: m.content }));
 }
 
-async function invokeLLMWithHealing(agent, baseMessages, llmClient) {
+async function invokeLLMWithHealing(agent, baseMessages, llmClient, ctx) {
     return runWithSelfHealing({
         callLLM: async (extra) => {
+            assertBeforeCall(ctx);
             const messages = extra ? [...baseMessages, { role: 'system', content: extra }] : baseMessages;
-            return llmClient.chat({ model: agent.model, messages });
+            const result = await llmClient.chat({ model: agent.model, messages });
+            recordTokens(ctx, result?.tokenUsage);
+            return result;
         },
     });
 }

@@ -4,6 +4,48 @@
 
 ---
 
+## [1.1.0] - 2026-05-19
+
+### 🔒 安全与成本加固
+
+聚焦修复 v1.0.0 安全审计中的 HIGH/MEDIUM 项。
+
+### Security
+- **修复 SSRF (HIGH)** — `httpRequest` 工具引入 `httpGuard.js`：
+  - 协议白名单（http/https），拒绝 `file://` / `ftp://` / `gopher://`
+  - 拒绝 URL 含 `userinfo`
+  - 拒绝 IP 字面量目标（127.0.0.1 / 10.x / 169.254.x 等）
+  - DNS 解析后逐 IP 校验私有/链路本地段（防 DNS 重绑定攻击）
+  - 任一解析地址为私有即拒绝（防多 A 记录混入）
+  - 5min 内存 DNS 缓存
+  - 环境变量 `HTTP_REQUEST_BLOCK_PRIVATE_IPS` / `HTTP_REQUEST_ALLOWED_HOSTS`
+
+### Added
+- **Token 配额熔断 (MEDIUM)** — 新增 `workflowEngine/tokenQuota.js`：
+  - 单工作流执行累计 token 上限，超额抛 `TokenQuotaError`
+  - 节点状态自动转 STUCK，工作流终态 STUCK
+  - 三级优先级：execute body > workflowDef > env > 默认 100k
+  - `cached_prompt_tokens` 不计入配额（已折扣）
+  - `WorkflowSchema` 扩展可选 `tokenQuota` 字段
+- `.env.example` 新增 SSRF/quota 配置项说明
+
+### Changed
+- `workflowExecutor.pickFailAction` 把 `TOKEN_QUOTA_EXCEEDED` 也归类为 STUCK 状态
+- `SECURITY_AUDIT.md` 标记 HIGH/MEDIUM 修复并更新评级
+- 测试默认 `HTTP_REQUEST_BLOCK_PRIVATE_IPS=false`，保留对生产策略的严格守卫
+
+### Tests
+- 44 套件 / 372 个用例全通过（V1.1 新增 44 个）
+- `httpGuard.test.js` 28 case（含 IPv6 / DNS 重绑定 / 白名单）
+- `tokenQuota.test.js` + `tokenQuotaIntegration.test.js` 16 case
+
+### Security Posture (Updated)
+**CRITICAL: 0 | HIGH: 0 (was 1) | MEDIUM: 3 (was 4) | INFO: 3**
+
+剩余项均为 V1.5/V2 计划（插件 sandbox / 签名 / npm audit CI）。
+
+---
+
 ## [1.0.0] - 2026-05-19
 
 ### 🎉 首个 MVP GA 发布

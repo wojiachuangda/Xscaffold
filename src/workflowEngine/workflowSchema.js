@@ -64,6 +64,7 @@ const WorkflowSchema = z
         description: z.string().max(2000).optional(),
         nodes: z.array(NodeSchema).min(1),
         edges: z.array(EdgeSchema).default([]),
+        tokenQuota: z.number().int().positive().max(10_000_000).optional(),
     })
     .strict()
     .superRefine(validateGraph);
