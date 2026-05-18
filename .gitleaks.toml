@@ -1,0 +1,13 @@
+# [scaffold] gitleaks config | Date: 2026-05-18 | Description: 密钥扫描规则（AA-SEAC §1.6 严禁硬编码）
+title = "Xscaffold gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "全局忽略文档示例与测试 fixture"
+paths = [
+    '''docs/''',
+    '''\.env\.example$''',
+    '''tests/.*fixtures.*''',
+]

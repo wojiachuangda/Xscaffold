@@ -1,0 +1,17 @@
+# [scaffold] ID: T0.1 | Date: 2026-05-18 | Description: 跨编辑器统一缩进/换行/编码（AA-SEAC §1.2）
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+max_line_length = 120
+
+[*.{json,yml,yaml,md}]
+indent_size = 2
+
+[Makefile]
+indent_style = tab
