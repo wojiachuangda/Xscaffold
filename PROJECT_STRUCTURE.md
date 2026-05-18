@@ -1,7 +1,7 @@
 # 🧭 AA-SEAC 实时项目文件拓扑树 (自动生成版)
 
 > **注意**：本文件由底层巡检工具 `pureTreeGenerator.js` 自动生成并覆盖刷新。请勿手动修改本文件。
-> **最新刷新时间**：`2026-05-18 11:25:09`
+> **最新刷新时间**：`2026-05-18 12:55:55`
 
 ```text
 src/
@@ -18,6 +18,10 @@ src/
 │   ├── response/
 │   │   └── envelope.js                      # 职责: 统一 API 响应契约 { success, data, error, meta } 的构造函数
 │   └── server.js                        # 职责: Express 应用工厂——装配中间件、路由、错误处理与健康检查
+├── configManager/
+│   ├── configLoader.js                  # 职责: 配置加载器——YAML/JSON 解析 + Zod 校验 + 转换为 workflowDef
+│   ├── configSchema.js                  # 职责: YAML/JSON 工作流配置 Schema 与到 workflowDef 的转换契约
+│   └── configWatcher.js                 # 职责: 配置文件变更监听器（chokidar 封装 + 防抖 + 显式 close）
 ├── infrastructure/
 │   ├── database/
 │   │   ├── connection.js                    # 职责: SQLite 连接抽象与单例管理（AA-SEAC §3 约束 4 依赖倒置）
@@ -40,6 +44,7 @@ src/
 │   │   ├── queryDatabase.js                 # 职责: 内置工具 queryDatabase——在主库执行只读 SQL（仅 SELECT）
 │   │   ├── readFile.js                      # 职责: 内置工具 readFile——读取本地文件
 │   │   └── sendEmail.js                     # 职责: 内置工具 sendEmail——MVP 阶段仅打日志（无外部依赖）
+│   ├── pluginLoader.js                  # 职责: 插件目录扫描与加载（单插件失败隔离，AA-SEAC §6 工具插件机制）
 │   ├── toolRegistry.js                  # 职责: 工具注册中心——注册/查询/执行，含超时与参数校验
 │   └── toolSchema.js                    # 职责: Tool 定义的 Zod Schema（AA-SEAC §4.1 代码即契约）
 └── workflowEngine/

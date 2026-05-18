@@ -1,0 +1,17 @@
+# [fixture] T3.5 演示插件工具在 YAML 工作流中可被调用
+name: plugin-demo
+nodes:
+  - id: rev
+    type: tool
+    toolName: reverseString
+    params:
+      input: "{{phrase}}"
+  - id: add
+    type: tool
+    toolName: addNumbers
+    params:
+      a: 1
+      b: 2
+edges:
+  - from: rev
+    to: add

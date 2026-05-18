@@ -1,0 +1,6 @@
+# [fixture] T3.2 缺少 name 字段
+version: 1.0
+nodes:
+  - id: a
+    type: agent
+    agentId: planner

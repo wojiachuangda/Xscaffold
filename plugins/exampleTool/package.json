@@ -1,0 +1,7 @@
+{
+  "name": "reverse-string-plugin",
+  "version": "1.0.0",
+  "description": "示例插件：字符串反转工具",
+  "main": "index.js",
+  "license": "ISC"
+}

@@ -1,0 +1,15 @@
+# [fixture] T3.2 含 workflow ref 节点（MVP 不解引用）
+name: parent-flow
+nodes:
+  - id: prep
+    type: tool
+    toolName: addNumbers
+    params:
+      a: 1
+      b: 2
+  - id: sub
+    type: workflow
+    ref: refund-process
+edges:
+  - from: prep
+    to: sub

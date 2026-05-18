@@ -1,0 +1,35 @@
+# [fixture] T3.2 demo workflow
+name: customer-support
+version: 1.0
+description: 客服意图分类示例
+nodes:
+  - id: classify
+    type: agent
+    agentId: intent-classifier
+    input: "用户问: {{question}}"
+  - id: route
+    type: condition
+    expression: "{{classify.intent}} == \"refund\""
+  - id: refund
+    type: tool
+    toolName: sendEmail
+    params:
+      to: ops@x.com
+      subject: 退款申请
+      body: "用户 {{userId}} 申请退款"
+  - id: fallback
+    type: tool
+    toolName: sendEmail
+    params:
+      to: ops@x.com
+      subject: 其他意图
+      body: "请人工跟进"
+edges:
+  - from: classify
+    to: route
+  - from: route
+    to: refund
+    condition: "true"
+  - from: route
+    to: fallback
+    condition: "false"

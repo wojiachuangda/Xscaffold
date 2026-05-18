@@ -1,0 +1,11 @@
+{
+  "name": "math-pipeline",
+  "version": "1.0",
+  "nodes": [
+    { "id": "sum", "type": "tool", "toolName": "addNumbers", "params": { "a": 10, "b": 20 } },
+    { "id": "double", "type": "tool", "toolName": "addNumbers", "params": { "a": "{{sum.result}}", "b": "{{sum.result}}" } }
+  ],
+  "edges": [
+    { "from": "sum", "to": "double" }
+  ]
+}

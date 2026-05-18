@@ -1,0 +1,7 @@
+name: x
+nodes:
+  - id: a
+    type: agent
+    agentId: planner
+  - this: is
+   broken: yaml
