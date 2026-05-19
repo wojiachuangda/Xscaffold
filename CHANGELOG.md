@@ -4,6 +4,52 @@
 
 ---
 
+## [1.6.0] - 2026-05-20
+
+### 🔒 V1.1.2 `/metrics` 强制鉴权
+
+兑现 `PLAN_V1.1.md` / 历史 CHANGELOG / `SECURITY_AUDIT.md` 早已公开的承诺——`/metrics` 端点从「匿名 + 可选 token」收紧为「生产强制 token」，并把 token 比对改为恒定时间，消除时序侧信道。
+
+阶段开发记录见 `docs/planning/PLAN_V1.1.2.md`。
+
+### ⚠️ BREAKING CHANGES
+
+- **`/metrics` 在生产环境强制 `METRICS_TOKEN`**：当 `NODE_ENV=production` 且 `METRICS_TOKEN` 未设置或为空值（空字符串 / 纯空白同样视为未配置）时，**进程启动即失败**（fail-fast）。
+  - 升级后生产部署若未配置该变量将无法启动。
+  - **迁移**：
+    1. 生成 token：`openssl rand -hex 32`
+    2. 配置环境变量 `METRICS_TOKEN=<生成的值>`
+    3. 更新 Prometheus 抓取配置：
+       ```yaml
+       scrape_configs:
+         - job_name: xscaffold
+           authorization:
+             credentials: <METRICS_TOKEN>   # 即 Authorization: Bearer <token>
+       ```
+       或使用兼容头 `x-metrics-token: <token>`
+- **非生产环境行为不变**：`NODE_ENV !== production` 且未配置 token 时 `/metrics` 仍匿名可访问，仅多打一条 `warn` 日志——开发/测试零摩擦。
+
+### Added
+- `src/infrastructure/security/timingSafe.js` — `timingSafeStringEqual(a, b)` 恒定时间字符串比对 helper
+- `/metrics` 鉴权支持标准 `Authorization: Bearer <token>` 头（scheme 大小写兼容）
+
+### Changed
+- `guardToken`（`observabilityController.js`）：
+  - 移除「`METRICS_TOKEN` 未配置即匿名放行」分支
+  - token 比对从 `!==` 改为 `timingSafeStringEqual`
+  - 严格 Bearer 解析：仅接受 `Bearer <单段 token>`；`Authorization` 头一旦出现即走 Bearer 路径，格式非法**不**回退到 `x-metrics-token`（避免双头语义含糊）；单独 `x-metrics-token` 头继续兼容
+- `webhookSignature.verifySignature`：内联 `crypto.timingSafeEqual` 改用共用 `timingSafeStringEqual` helper（消除重复）
+- `.env.example` / `README.md`：`METRICS_TOKEN` 标注「生产必填」并附 Prometheus 抓取示例
+
+### Security
+- `SECURITY_AUDIT.md`：A01「无意暴露 `/metrics`」MEDIUM → ✅ RESOLVED；新增 §8 修复说明；评级 MEDIUM 项 3 → 2
+
+### Quality
+- 测试：7 个 `timingSafe` 单测 + `observability.e2e` 新增 8 个 `/metrics` 鉴权用例（错值 / Bearer / 大小写 / 非法格式不回退 / 生产 fail-fast）
+- 本地门禁：514 passed / 15 skipped / 0 failed；`npm run lint` 0 error
+
+---
+
 ## [1.5.0] - 2026-05-20
 
 ### 🧵 V1.5-B BullMQ + Redis 持久化队列

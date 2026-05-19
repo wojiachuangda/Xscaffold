@@ -1,7 +1,7 @@
 # 🧭 AA-SEAC 实时项目文件拓扑树 (自动生成版)
 
 > **注意**：本文件由底层巡检工具 `pureTreeGenerator.js` 自动生成并覆盖刷新。请勿手动修改本文件。
-> **最新刷新时间**：`2026-05-19 17:13:58`
+> **最新刷新时间**：`2026-05-19 18:04:24`
 
 ```text
 src/
@@ -12,7 +12,7 @@ src/
 │   └── agentService.js                  # 职责: Agent 业务编排层（async；严禁直接调 SQL；依赖 repository 抽象）
 ├── apiGateway/
 │   ├── controllers/
-│   │   ├── observabilityController.js       # 职责: 可观测性路由（trace 查询 + /metrics Prometheus 端点；async store/repo）
+│   │   ├── observabilityController.js       # 职责: 可观测性路由（trace 查询 + /metrics 端点；metrics 强制 token + timing-safe 比对）
 │   │   ├── webhookController.js             # 职责: Webhook 路由——签名校验后入队触发工作流（async store）
 │   │   └── workflowController.js            # 职责: 工作流路由控制器（async store；POST execute 202 异步 + GET status）
 │   ├── middlewares/
@@ -84,12 +84,14 @@ src/
 │   │   └── AppError.js                      # 职责: 应用统一错误基类与典型子类（AA-SEAC §3 约束 1 统一响应契约）
 │   ├── llmClient/
 │   │   └── openaiClient.js                  # 职责: OpenAI 兼容 Chat Completion 客户端（IOOR 元数据抓取 + 重试 + 超时）
-│   └── queue/
-│       ├── bullmqAdapter.js                 # 职责: BullMQ + Redis 持久化队列适配器（per-name Queue/Worker；async 契约；状态归一）
-│       ├── index.js                         # 职责: 队列 driver dispatch——按 QUEUE_DRIVER + REDIS_URL 选择 memory/bullmq 实现
-│       ├── inMemoryAdapter.js               # 职责: 内存队列适配器——单进程异步任务派发；V1.5-B 起 enqueue/getJob/close 改 async 以对齐统一契约
-│       └── schemas/
-│           └── queueConfigSchema.js             # 职责: 队列配置 Zod 契约——memory/bullmq 双分支 discriminated union（AA-SEAC §4.1 代码即契约）
+│   ├── queue/
+│   │   ├── bullmqAdapter.js                 # 职责: BullMQ + Redis 持久化队列适配器（per-name Queue/Worker；每实例独立 ioredis 连接；BullMQ error 事件兜底）
+│   │   ├── index.js                         # 职责: 队列 driver dispatch——按 QUEUE_DRIVER + REDIS_URL 选择 memory/bullmq 实现
+│   │   ├── inMemoryAdapter.js               # 职责: 内存队列适配器——单进程异步任务派发；V1.5-B 起 enqueue/getJob/close 改 async 以对齐统一契约
+│   │   └── schemas/
+│   │       └── queueConfigSchema.js             # 职责: 队列配置 Zod 契约——memory/bullmq 双分支 discriminated union（AA-SEAC §4.1 代码即契约）
+│   └── security/
+│       └── timingSafe.js                    # 职责: 恒定时间字符串比对 helper——webhook 签名与 metrics token 共用，杜绝时序侧信道
 ├── main.js                          # 职责: 应用入口——启动 Express + 优雅停机：先停 HTTP 收新请求，再 await queue.close() 等在途 job
 ├── memoryManager/
 │   ├── memoryRepository.js              # 职责: messages 表 Repository（async 契约；SQL 仅在此文件）

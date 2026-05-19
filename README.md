@@ -183,7 +183,15 @@ npm run smoke:project-assistant  # 项目助理闭环 smoke
 ## 🛡 安全须知
 
 - **JWT_SECRET**：生产必须替换 `.env.example` 中的占位值，强度 ≥ 32 字符随机串
-- **METRICS_TOKEN**：建议在生产启用，防止 `/metrics` 匿名拉取
+- **METRICS_TOKEN**（v1.6.0 起破坏性变更）：生产环境（`NODE_ENV=production`）**必须**配置非空值，否则进程启动即失败（fail-fast）；开发/测试未设时 `/metrics` 匿名可访问并打 warn。生成：`openssl rand -hex 32`。Prometheus 抓取配置示例：
+  ```yaml
+  scrape_configs:
+    - job_name: xscaffold
+      authorization:
+        credentials: <METRICS_TOKEN>   # 等价于 Authorization: Bearer <token>
+      static_configs:
+        - targets: ['xscaffold-host:3000']
+  ```
 - **HTTP_REQUEST_ALLOWED_HOSTS**：v1.0.0 已知限制 — `httpRequest` 工具无内置 SSRF 白名单，运维侧需配置网络隔离（V1.1 代码层修复）
 - **插件信任边界**：MVP 阶段 `plugins/` 内插件以进程权限运行；V2 引入 sandbox
 
