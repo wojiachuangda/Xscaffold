@@ -4,6 +4,54 @@
 
 ---
 
+## [1.7.0] - 2026-05-20
+
+### 🪣 V1.5 IOOR 批量缓冲
+
+把 IOOR 写入从「每 turn 一次同步 INSERT + 一次 SELECT 回读」改为「内存有界缓冲 + 五重触发 flush」，降低高并发工作流下的写放大。**同步修订 AA-SEAC §4.2** 「全量流式记录」为允许有界缓冲窗口，并显式声明非受控崩溃下的 bounded loss window。
+
+阶段开发记录见 `docs/planning/PLAN_V1.5-IOOR-BATCH.md`。
+
+### ⚠️ Semantic Change（非 REST API 破坏，但需运维知悉）
+
+- **IOOR 不再「写即落盘」**：`record()` 改为入队内存缓冲并立即返回 in-memory 记录。落盘由五个触发点之一决定：
+  1. 累计达 `IOOR_BATCH_SIZE`（默认 50 条）
+  2. 定时扫描 `IOOR_BATCH_INTERVAL_MS`（默认 1000 ms）
+  3. **execution 完成**：`workflowController.runOne` 在 `markFinal` 后立即 flush 该 execution
+  4. **读路径 lazy flush**：HTTP `/workflows/executions/:id/trace` 查询前 flush 该 execution
+  5. **受控 shutdown**：`SIGTERM/SIGINT` 触发 `await ioorRecorder.close()`（先 HTTP 停 → 再 queue 关 → 再 IOOR flush）
+- **bounded loss window（诚实声明）**：受控路径覆盖以上 5 个时机；但**非受控崩溃（`kill -9` / 宿主机掉电 / OOM Kill）下最多丢失一个缓冲窗口（默认 ≤50 条 / ≤1000 ms）的 IOOR 记录**。这是性能与「实时全量」之间的明确权衡，详见 AA-SEAC §4.2 修订与文末「规范修订日志」。
+
+### Added
+- `src/observability/ioorBuffer.js` — 内存批量缓冲核心，`Map<execId, records[]>` 分组；`push / flush(id) / flushAll / close / size`；定时器 `unref` 不阻塞退出
+- `src/observability/schemas/ioorBufferConfigSchema.js` — `batchSize / intervalMs` Zod 契约（默认 50 / 1000 ms）
+- `src/observability/ioorRepository.js` 新增 `insertMany(records)` —— 多行 VALUES，含 `created_at`；内部按 ≤200 行/SQL 分块兜底 SQLite/PG 占位符上限
+- 环境变量：`IOOR_BATCH_SIZE` / `IOOR_BATCH_INTERVAL_MS`；`.env.example` 含风险提示
+- `deps.ioorRecorder` 暴露：修复此前 `buildDependencies()` 创建了 recorder 但未在返回的 deps 中暴露的遗漏，使 `workflowController` / trace lazy flush / `main.js` shutdown 共用同一实例
+
+### Changed
+- `ioorRecorder.record()`：脱敏与契约校验通过后生成 `id + createdAt` 推入缓冲并**立即返回 in-memory 记录**，不再产生同步 SQL；契约校验失败仍即时走 audit 死信（per-record 失败 ≠ 批量 flush 失败）
+- `ioorRecorder` 新增 `flush(executionId?) / close()` 委托 buffer
+- `workflowController.runOne`：`markFinal` 后立即 `await deps.ioorRecorder.flush(executionId)`
+- `observabilityController` trace 路由：`listByExecution` 前 lazy `flush(req.params.id)`
+- `main.js` 优雅停机第三步：`await deps.ioorRecorder.close()`（含 `flushAll`）；同时把 `gracefulCloseQueue` 重命名为 `gracefulShutdown` 统一收尾
+
+### Fixed
+- `flush` 失败兜底（D-IOOR-5）：bulk insert 抛错时整批进 `audit_dead_letters`（`source: 'ioor.batch'`, `payload: records[]`），「凡动必留痕」的最低保障
+
+### Docs / Spec
+- **AA-SEAC §4.2「全量流式记录」修订**：「实时全量持久化」改为「原子单位 + 可配置的 ≤N 条 / ≤T ms 有界缓冲窗口 + 受控路径强制 flush + flush 失败必须进 `audit_dead_letters`」
+- AA-SEAC 文末新增「规范修订日志」段，V1.5 修订记录含 bounded loss window 的诚实声明
+
+### Quality
+- 测试：8 个 `ioorBuffer` 单测（触发条件 / 死信兜底 / 构造校验）+ `ioorRecorder.test` 7 个用例改 `await flush` + 1 新用例覆盖「`batchSize` 自动 flush」+ `agentNodeIntegration` IOOR 2 用例补 `await flush`
+- 本地门禁：524 passed / 15 skipped / 0 failed；`npm run lint` 0 error
+
+### Release Gate
+- 沿用纪律：**tag `v1.7.0` 推迟到 CI 通过后再打**
+
+---
+
 ## [1.6.0] - 2026-05-20
 
 ### 🔒 V1.1.2 `/metrics` 强制鉴权
