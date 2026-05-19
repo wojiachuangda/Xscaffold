@@ -6,7 +6,7 @@ const path = require('path');
 const Database = require('better-sqlite3');
 
 const SQLITE_UNIQUE_VIOLATION = 'SQLITE_CONSTRAINT_UNIQUE';
-const MIGRATIONS_DIR = path.resolve(__dirname, '..', 'migrations');
+const MIGRATIONS_DIR = path.resolve(__dirname, '..', 'migrations', 'sqlite');
 
 function ensureDirectory(filename) {
     if (filename === ':memory:') {

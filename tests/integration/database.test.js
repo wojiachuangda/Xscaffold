@@ -18,8 +18,15 @@ describe('parseDatabaseUrl', () => {
         expect(parseDatabaseUrl()).toEqual({ driver: 'sqlite', filename: ':memory:' });
     });
 
+    test('postgres:// 协议被识别（A.2 引入）', () => {
+        expect(parseDatabaseUrl('postgres://u:p@localhost:5432/db')).toMatchObject({
+            driver: 'postgres',
+            connectionString: 'postgres://u:p@localhost:5432/db',
+        });
+    });
+
     test('未知协议抛错', () => {
-        expect(() => parseDatabaseUrl('postgres://...')).toThrow(/仅支持 sqlite/);
+        expect(() => parseDatabaseUrl('mysql://x')).toThrow(/不支持的 DATABASE_URL 协议/);
     });
 });
 

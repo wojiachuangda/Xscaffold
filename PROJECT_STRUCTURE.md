@@ -1,7 +1,7 @@
 # 🧭 AA-SEAC 实时项目文件拓扑树 (自动生成版)
 
 > **注意**：本文件由底层巡检工具 `pureTreeGenerator.js` 自动生成并覆盖刷新。请勿手动修改本文件。
-> **最新刷新时间**：`2026-05-19 15:26:58`
+> **最新刷新时间**：`2026-05-19 16:00:43`
 
 ```text
 src/
@@ -55,19 +55,30 @@ src/
 │   │   ├── connection.js                    # 职责: Driver dispatch + 懒加载单例（替换 v1.1 better-sqlite3 直耦合，AA-SEAC §3 约束 4）
 │   │   ├── drivers/
 │   │   │   ├── driverInterface.js               # 职责: Driver 接口规范（pure JSDoc typedef，S7 已清除 S2 过渡 facade typedef）
-│   │   │   ├── index.js                         # 职责: Driver dispatch——按 DATABASE_URL 协议选择实现
+│   │   │   ├── index.js                         # 职责: Driver dispatch——按 DATABASE_URL 协议选择 sqlite 或 postgres 实现
+│   │   │   ├── pgDriver.js                      # 职责: PostgreSQL Driver——node-postgres 的 Driver 接口实现（占位符重写、JSONB 文本归一、async 事务）
 │   │   │   └── sqliteDriver.js                  # 职责: SQLite Driver——better-sqlite3 同步引擎的 async 包装（S2 过渡 facade 已清除）
 │   │   ├── migrate.js                       # 职责: 迁移引擎——真异步实现（无 wrapRawDatabase 透传）；入参必须是 Driver
 │   │   ├── migrations/
-│   │   │   ├── 001_create_agents.sql            # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
-│   │   │   ├── 002_create_executions.sql        # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
-│   │   │   ├── 003_create_messages.sql          # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
-│   │   │   ├── 004_create_traces.sql            # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
-│   │   │   ├── 005_create_ioor.sql              # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
-│   │   │   ├── 006_create_project_assistant_core.sql # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
-│   │   │   └── 007_create_external_agent_calls.sql # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │   ├── pg/
+│   │   │   │   ├── 000_init_helpers.sql             # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │   │   ├── 001_create_agents.sql            # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │   │   ├── 002_create_executions.sql        # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │   │   ├── 003_create_messages.sql          # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │   │   ├── 004_create_traces.sql            # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │   │   ├── 005_create_ioor.sql              # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │   │   ├── 006_create_project_assistant_core.sql # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │   │   └── 007_create_external_agent_calls.sql # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │   └── sqlite/
+│   │   │       ├── 001_create_agents.sql            # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │       ├── 002_create_executions.sql        # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │       ├── 003_create_messages.sql          # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │       ├── 004_create_traces.sql            # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │       ├── 005_create_ioor.sql              # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │       ├── 006_create_project_assistant_core.sql # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │       └── 007_create_external_agent_calls.sql # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
 │   │   └── schemas/
-│   │       ├── driverConfigSchema.js            # 职责: Driver 配置 Zod 契约——DATABASE_URL 解析结果的强类型校验（AA-SEAC §4.1 代码即契约）
+│   │       ├── driverConfigSchema.js            # 职责: Driver 配置 Zod 契约——sqlite/postgres 双分支 discriminated union（AA-SEAC §4.1 代码即契约）
 │   │       └── queryResultSchema.js             # 职责: Driver query/run 返回结构 Zod 契约（AA-SEAC §3 约束 4：Repository 上层只感知此抽象）
 │   ├── errors/
 │   │   └── AppError.js                      # 职责: 应用统一错误基类与典型子类（AA-SEAC §3 约束 1 统一响应契约）

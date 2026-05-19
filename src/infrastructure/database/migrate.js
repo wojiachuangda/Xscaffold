@@ -7,9 +7,11 @@ const path = require('path');
 const { getDb } = require('./connection');
 const { logger } = require('../../observability/logger');
 
+// 方言中立 DDL：`CURRENT_TIMESTAMP` 是 SQL 标准，SQLite 与 PostgreSQL 都支持，
+// 替换 V1.5-A.1 临时使用的 SQLite 专属 `datetime('now')`，使 PG driver 可直接复用此 DDL
 const SCHEMA_MIGRATIONS_DDL = `CREATE TABLE IF NOT EXISTS schema_migrations (
     id TEXT PRIMARY KEY,
-    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 )`;
 
 function assertDriver(driver) {
