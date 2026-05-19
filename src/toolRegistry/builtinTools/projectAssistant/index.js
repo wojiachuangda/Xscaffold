@@ -9,6 +9,7 @@ const eventRecord = require('./eventRecord');
 const reminderCreate = require('./reminderCreate');
 const reminderListDue = require('./reminderListDue');
 const externalAgentSend = require('./externalAgentSend');
+const projectGenerateDigest = require('./projectGenerateDigest');
 
 const PROJECT_ASSISTANT_TOOLS = [
     projectGetStatus,
@@ -19,6 +20,7 @@ const PROJECT_ASSISTANT_TOOLS = [
     reminderCreate,
     reminderListDue,
     externalAgentSend,
+    projectGenerateDigest,
 ];
 
 module.exports = { PROJECT_ASSISTANT_TOOLS };
