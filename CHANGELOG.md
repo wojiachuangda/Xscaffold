@@ -4,6 +4,56 @@
 
 ---
 
+## [1.3.0] - 2026-05-19
+
+### 🤖 Project Assistant MVP
+
+新增**项目助理**总控 Agent 闭环：跟踪项目进度、记录事件、生成提醒、调用外部常驻 HTTP Agent、输出项目摘要。
+项目助理不直接写代码、不审代码、不自动 push，是协调与摘要型 Agent。
+
+阶段开发记录见 `docs/planning/PLAN_PROJECT_ASSISTANT_MVP.md` 与 10 个 PAM 阶段 commit。
+
+### Added — 9 个固定 Tool
+
+| Tool | 职责 |
+|------|------|
+| `projectGetStatus` / `projectUpdateStatus` | 读取 / upsert 项目状态（首次落库 `name` 兜底取 `projectId`） |
+| `taskList` / `taskUpsert` | 列出 / 创建更新任务（复合主键 `projectId + taskId`） |
+| `eventRecord` | 记录不可变事件流水（落库前必经 `redactSensitive` 通道） |
+| `reminderCreate` / `reminderListDue` | 创建 / 查询到期提醒（`status=open AND due_at<=before`） |
+| `externalAgentSend` | 调用白名单外部 HTTP Agent，URL 固定在服务端、全程审计留痕 |
+| `projectGenerateDigest` | 生成项目摘要（markdown / json；含最近 10 事件、未来 24h 提醒） |
+
+### Added — 数据与编排
+
+- `src/domain/projectAssistant/` 新增领域模块：8 个 Zod schema + 4 个 Repository + digestBuilder + externalAgentClient + profile 白名单。
+- 迁移 `006_create_project_assistant_core.sql`（`projects` / `pa_tasks` / `pa_events` / `pa_reminders`）+ `007_create_external_agent_calls.sql`（审计日志，不暴露独立列表 Tool）。
+- 工作流 `workflows/project-assistant-digest.yaml` 把 7 个 Tool 串成顺序闭环。
+- `createApp` 启动期容错装载 `workflows/` 目录（默认非严格——坏 YAML 仅告警；`strictWorkflowLoad: true` 才上抛）。
+- `npm run smoke:project-assistant` 一键 smoke：起临时 HTTP stub 扮演外部 Agent，走完整 `createApp + supertest` HTTP 路径，严格语义任一步失败 exit 1。
+
+### Security
+
+- `externalAgentSend` 复用 `httpGuard.assertSafeUrl` 做 SSRF 校验；profile 自身 host 进 `allowedHosts` 豁免私网拒绝（protocol/userinfo 校验保留）；入参 schema 无 URL 字段，Agent/用户无法传入任何地址。
+- `EXTERNAL_AGENT_PROFILE_OVERRIDE` 仅作为测试/smoke 钩子。
+- 外部调用 reply / raw / summary 按 schema 上限截断（32KB / 8KB / 4KB）。
+- 调用前先 `insertPending` 拿 callId；失败/超时同样留痕 `failed`/`timeout`——凡动必留痕。
+- 事件落库前走项目脱敏（按字段名脱敏；项目策略不做内容启发式扫描）。
+
+### Docs
+
+- `README.md` 新增「项目助理 MVP」段落与 smoke 验证说明，并订正内置工具数 / 目录树。
+- 新增 `docs/tool-dev.md`——Tool 开发参数结构与契约规范。
+- `docs/planning/PLAN_PROJECT_ASSISTANT_MVP.md` 收录 Q1–Q13 全部架构决策（含 Q13 upsert 兜底）。
+- `PROJECT_STRUCTURE.md` 重新生成，反映 `domain/projectAssistant/` 与 `builtinTools/projectAssistant/` 新增节点。
+
+### Quality
+
+- 测试：60 suites / 464 用例全过；覆盖率 statements 95.27% / branches 86.27% / functions 96.69% / lines 95.42%（远超 80% 门槛）。
+- `npm run lint` / `npm run format:check` / `npm run audit:ci` 全绿（0 漏洞）。
+
+---
+
 ## [1.1.1] - 2026-05-19
 
 ### 🛡️ CI 依赖审计集成（OWASP A06）
