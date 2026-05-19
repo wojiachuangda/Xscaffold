@@ -65,12 +65,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 用官方 gitleaks 二进制 + --no-git 扫工作目录，避免 gitleaks-action
+      # 在首次推送完整历史 / schedule 触发下 commit range 解析失败的边界问题
+      - name: Install gitleaks
+        run: |
+          VERSION=8.18.4
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan working tree
+        run: gitleaks detect --source . --no-git --verbose --redact
 
   dependency-audit:
     name: Dependency Audit (npm audit)
