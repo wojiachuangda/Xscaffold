@@ -1,7 +1,7 @@
 # 🧭 AA-SEAC 实时项目文件拓扑树 (自动生成版)
 
 > **注意**：本文件由底层巡检工具 `pureTreeGenerator.js` 自动生成并覆盖刷新。请勿手动修改本文件。
-> **最新刷新时间**：`2026-05-18 22:48:51`
+> **最新刷新时间**：`2026-05-19 01:31:36`
 
 ```text
 src/
@@ -67,7 +67,8 @@ src/
 ├── toolRegistry/
 │   ├── builtinTools/
 │   │   ├── addNumbers.js                    # 职责: 内置工具 addNumbers——示例数学工具
-│   │   ├── httpRequest.js                   # 职责: 内置工具 httpRequest——基于 Node fetch 的 HTTP 客户端
+│   │   ├── httpGuard.js                     # 职责: SSRF 防护——URL 协议白名单 + 私有 IP 拒绝 + DNS 重绑定校验
+│   │   ├── httpRequest.js                   # 职责: HTTP 客户端工具，集成 SSRF 守卫
 │   │   ├── index.js                         # 职责: 内置工具索引——注册到默认 registry
 │   │   ├── queryDatabase.js                 # 职责: 内置工具 queryDatabase——在主库执行只读 SQL（仅 SELECT）
 │   │   ├── readFile.js                      # 职责: 内置工具 readFile——读取本地文件
@@ -82,6 +83,7 @@ src/
     ├── nodeRunner.js                    # 职责: 节点执行器：四类节点 + 超时/重试 + 记忆/IOOR/自愈/trace 集成
     ├── selfHealing.js                   # 职责: 有界自愈控制器（AA-SEAC §5：契约失败重投喂 ≤2 次，超限转 STUCK）
     ├── taskStateMachine.js              # 职责: 任务状态机（AA-SEAC §3 约束 3：独立纯函数，对外仅暴露 transition）
+    ├── tokenQuota.js                    # 职责: 工作流 Token 配额熔断（不计 cached；超额抛 TokenQuotaError）
     ├── workflowExecutor.js              # 职责: 工作流执行器（拓扑遍历 + 条件分支裁剪 + 输出注入 context）
     ├── workflowRegistry.js              # 职责: 工作流定义注册中心（内存版，可由 YAML 扫描或代码预定义喂入）
     └── workflowSchema.js                # 职责: 工作流 Zod Schema（节点 union + DAG 环检测）
