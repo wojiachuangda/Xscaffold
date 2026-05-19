@@ -14,7 +14,7 @@ const { timingSafeStringEqual } = require('../../infrastructure/security/timingS
 const BEARER_PATTERN = /^Bearer\s+(\S+)$/i;
 
 /**
- * @param {{ traceCollector, ioorRepository, executionStore }} deps
+ * @param {{ traceCollector, ioorRepository, ioorRecorder, executionStore }} deps
  */
 function buildExecutionTraceRouter(deps) {
     const router = express.Router();
@@ -23,6 +23,11 @@ function buildExecutionTraceRouter(deps) {
         validate({ params: ExecutionIdParamSchema }),
         asyncHandler(async (req, res) => {
             await deps.executionStore.requireById(req.params.id);
+            // V1.5：查 trace 前 lazy flush 该 execution 的 IOOR 缓冲，
+            // 确保 in-progress execution 的已记录 turn 也对查询可见
+            if (deps.ioorRecorder) {
+                await deps.ioorRecorder.flush(req.params.id);
+            }
             const spans = deps.traceCollector ? await deps.traceCollector.listByExecution(req.params.id) : [];
             const ioor = deps.ioorRepository ? await deps.ioorRepository.listByExecution(req.params.id) : [];
             res.json(success({ executionId: req.params.id, spans, ioor }));

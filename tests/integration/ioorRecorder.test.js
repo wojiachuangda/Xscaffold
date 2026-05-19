@@ -1,4 +1,4 @@
-// [test] ID: T5.3 | Date: 2026-05-19 | Description: ioorRecorder 集成测试（A.1 async 契约；脱敏 + audit 降级）
+// [test] ID: V1.5-IOOR-BATCH | Date: 2026-05-20 | Description: ioorRecorder 集成测试（批量缓冲：record 入队 → flush 后落库可查）
 'use strict';
 
 const { createSqliteDriver } = require('../../src/infrastructure/database/drivers/sqliteDriver');
@@ -17,14 +17,32 @@ async function bootRecorder() {
     return { driver, recorder, ioorRepository, auditRepository };
 }
 
-describe('ioorRecorder', () => {
+describe('ioorRecorder（V1.5 批量缓冲）', () => {
     let ctx;
     beforeEach(async () => {
         ctx = await bootRecorder();
     });
-    afterEach(() => ctx.driver.close());
+    afterEach(async () => {
+        await ctx.recorder.close();
+        await ctx.driver.close();
+    });
 
-    test('正常落库 + 可按 execution 查询', async () => {
+    test('record 入队后立即返回 in-memory 记录（含 id / createdAt）', async () => {
+        const rec = await ctx.recorder.record({
+            executionId: 'exec_ret',
+            nodeId: 'n1',
+            turnIndex: 0,
+            input: null,
+            output: null,
+            tokenUsage: null,
+            latencyMs: null,
+        });
+        expect(rec.id).toMatch(/^ioor_/);
+        expect(typeof rec.createdAt).toBe('string');
+        expect(ctx.recorder.bufferSize()).toBe(1);
+    });
+
+    test('flush 后正常落库 + 可按 execution 查询', async () => {
         await ctx.recorder.record({
             executionId: 'exec_a',
             nodeId: 'n1',
@@ -38,6 +56,7 @@ describe('ioorRecorder', () => {
             tokenUsage: { prompt: 3, completion: 1, total: 4, cached_prompt_tokens: 0 },
             latencyMs: 100,
         });
+        await ctx.recorder.flush('exec_a');
         const list = await ctx.ioorRepository.listByExecution('exec_a');
         expect(list).toHaveLength(1);
         expect(list[0].agentId).toBe('a1');
@@ -57,6 +76,7 @@ describe('ioorRecorder', () => {
             tokenUsage: null,
             latencyMs: null,
         });
+        await ctx.recorder.flush();
         const list = await ctx.ioorRepository.listByExecution('exec_b');
         expect(list[0].input.apiKey).toBe('[REDACTED]');
         expect(list[0].input.user).toBe('alice');
@@ -74,12 +94,13 @@ describe('ioorRecorder', () => {
             tokenUsage: null,
             latencyMs: null,
         });
+        await ctx.recorder.flush('exec_c');
         const list = await ctx.ioorRepository.listByExecution('exec_c');
         expect(list[0].toolCalls[0].arguments.password).toBe('[REDACTED]');
         expect(list[0].observations[0].result.token).toBe('[REDACTED]');
     });
 
-    test('契约校验失败 → 走 audit 降级', async () => {
+    test('契约校验失败 → 即时走 audit 降级（不入缓冲）', async () => {
         // missing required executionId
         await ctx.recorder.record({
             nodeId: 'n',
@@ -87,11 +108,12 @@ describe('ioorRecorder', () => {
             input: 'broken',
             output: null,
         });
+        expect(ctx.recorder.bufferSize()).toBe(0);
         const dead = await ctx.auditRepository.listRecent('ioor', 10);
         expect(dead).toHaveLength(1);
     });
 
-    test('turnIndex 排序：同 execution 多 turn 按顺序返回', async () => {
+    test('turnIndex 排序：同 execution 多 turn flush 后按顺序返回', async () => {
         for (let i = 0; i < 3; i += 1) {
             // eslint-disable-next-line no-await-in-loop
             await ctx.recorder.record({
@@ -106,7 +128,36 @@ describe('ioorRecorder', () => {
                 latencyMs: null,
             });
         }
+        await ctx.recorder.flush('exec_x');
         const list = await ctx.ioorRepository.listByExecution('exec_x');
         expect(list.map((r) => r.turnIndex)).toEqual([0, 1, 2]);
+    });
+
+    test('batchSize 触发自动 flush', async () => {
+        const recorder = createIoorRecorder({
+            ioorRepository: ctx.ioorRepository,
+            auditRepository: ctx.auditRepository,
+            bufferConfig: { batchSize: 3, intervalMs: 60000 },
+        });
+        try {
+            for (let i = 0; i < 3; i += 1) {
+                // eslint-disable-next-line no-await-in-loop
+                await recorder.record({
+                    executionId: 'exec_auto',
+                    nodeId: 'n1',
+                    turnIndex: i,
+                    input: null,
+                    output: null,
+                    tokenUsage: null,
+                    latencyMs: null,
+                });
+            }
+            // 第 3 条触发 flushAll；等微任务队列清空
+            await new Promise((r) => setImmediate(r));
+            const list = await ctx.ioorRepository.listByExecution('exec_auto');
+            expect(list).toHaveLength(3);
+        } finally {
+            await recorder.close();
+        }
     });
 });

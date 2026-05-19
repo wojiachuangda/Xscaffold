@@ -43,7 +43,7 @@ async function bootEnv(overrides = {}) {
         memoryStore,
         ioorRecorder,
     });
-    return { driver, runner, llmClient, agentService, memoryStore, ioorRepository };
+    return { driver, runner, llmClient, agentService, memoryStore, ioorRepository, ioorRecorder };
 }
 
 describe('runAgentNode + 记忆注入', () => {
@@ -97,6 +97,7 @@ describe('runAgentNode + IOOR 记录', () => {
         const node = { id: 'n', type: 'agent', agentId: 'a1', input: 'hi' };
         const ctx = { sessionId: 's', executionId: 'exec-A' };
         await env.runner.runNode(node, ctx);
+        await env.ioorRecorder.flush('exec-A');
         const records = await env.ioorRepository.listByExecution('exec-A');
         expect(records).toHaveLength(1);
         expect(records[0].agentId).toBe('a1');
@@ -107,6 +108,7 @@ describe('runAgentNode + IOOR 记录', () => {
     test('IOOR 持久化的 input.messages 中包含 user prompt', async () => {
         const node = { id: 'n', type: 'agent', agentId: 'a1', input: '查询订单' };
         await env.runner.runNode(node, { sessionId: 's', executionId: 'exec-B' });
+        await env.ioorRecorder.flush('exec-B');
         const records = await env.ioorRepository.listByExecution('exec-B');
         const msgs = records[0].input.messages;
         expect(msgs[msgs.length - 1].content).toBe('查询订单');

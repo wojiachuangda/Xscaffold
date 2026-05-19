@@ -24,10 +24,10 @@ function start() {
         logger.info({ signal }, 'shutting down');
         // 第一步：停 HTTP 收新请求；现有请求继续完成
         server.close(() => {
-            gracefulCloseQueue(app)
+            gracefulShutdown(app)
                 .then(() => process.exit(0))
                 .catch((err) => {
-                    logger.error({ err: err.message }, 'queue close failed during shutdown');
+                    logger.error({ err: err.message }, 'graceful shutdown failed');
                     process.exit(1);
                 });
         });
@@ -40,13 +40,20 @@ function start() {
 }
 
 /**
- * 第二步：await deps.queue.close() 等待在途 worker 完成。
- * BullMQ 队列尤其需要此步：未关将留下 ioredis 连接句柄。
+ * 第二步：依次释放资源（best-effort）。
+ * - queue.close()：等待在途 worker 完成，关 ioredis 连接句柄
+ * - ioorRecorder.close()：flush IOOR 缓冲并清定时器（受控 shutdown 的 flush 触发点）
+ *
+ * 注意：这是受控 shutdown 的 best-effort flush。非受控崩溃（kill -9 / 掉电）
+ * 不在此保障内，详见 AA-SEAC §4.2 修订说明的 bounded loss window。
  */
-async function gracefulCloseQueue(app) {
-    const deps = app.locals && app.locals.deps;
-    if (deps && deps.queue && typeof deps.queue.close === 'function') {
+async function gracefulShutdown(app) {
+    const deps = (app.locals && app.locals.deps) || {};
+    if (deps.queue && typeof deps.queue.close === 'function') {
         await deps.queue.close();
+    }
+    if (deps.ioorRecorder && typeof deps.ioorRecorder.close === 'function') {
+        await deps.ioorRecorder.close();
     }
 }
 

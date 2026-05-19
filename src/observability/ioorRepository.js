@@ -73,10 +73,66 @@ async function listByExecution(driver, executionId) {
     return rows.map(rowToEntity);
 }
 
+// 单条 INSERT 列序（含 created_at——批量场景 created_at 由 buffer 在入队时确定）
+const INSERT_COLUMNS =
+    '(id, execution_id, node_id, turn_index, agent_id, profile_hash, ' +
+    'model_provider, model_name, input, output, tool_calls, observations, ' +
+    'token_usage, latency_ms, created_at)';
+const ROW_PLACEHOLDER = `(${new Array(15).fill('?').join(', ')})`;
+// 单条 SQL 最多承载的行数：15 列 × 200 = 3000 占位符，远低于 SQLite/PG 上限
+const MAX_ROWS_PER_STATEMENT = 200;
+
+function jsonOrNull(value) {
+    return value === null || value === undefined ? null : JSON.stringify(value);
+}
+
+function recordToParams(record) {
+    return [
+        record.id,
+        record.executionId,
+        record.nodeId,
+        record.turnIndex,
+        record.agentId ?? null,
+        record.profileHash ?? null,
+        record.modelProvider ?? null,
+        record.modelName ?? null,
+        jsonOrNull(record.input),
+        jsonOrNull(record.output),
+        JSON.stringify(record.toolCalls || []),
+        JSON.stringify(record.observations || []),
+        jsonOrNull(record.tokenUsage),
+        record.latencyMs ?? null,
+        record.createdAt,
+    ];
+}
+
+/**
+ * 批量插入 IOOR 记录（V1.5 批量缓冲）。
+ * 入参 records 必须已带 id 与 createdAt（由 ioorBuffer 在入队时生成）。
+ * 超过单 SQL 承载上限时内部分块。
+ *
+ * @returns {Promise<{ inserted: number }>}
+ */
+async function insertManyRecords(driver, records) {
+    if (!Array.isArray(records) || records.length === 0) {
+        return { inserted: 0 };
+    }
+    for (let i = 0; i < records.length; i += MAX_ROWS_PER_STATEMENT) {
+        const chunk = records.slice(i, i + MAX_ROWS_PER_STATEMENT);
+        const values = new Array(chunk.length).fill(ROW_PLACEHOLDER).join(', ');
+        const sql = `INSERT INTO ioor_records ${INSERT_COLUMNS} VALUES ${values}`;
+        const params = chunk.flatMap(recordToParams);
+        // eslint-disable-next-line no-await-in-loop
+        await driver.run(sql, params);
+    }
+    return { inserted: records.length };
+}
+
 function buildIoorRepository(driverOrUndefined) {
     const driver = driverOrUndefined || getDb();
     return {
         insert: (record) => insertRecord(driver, record),
+        insertMany: (records) => insertManyRecords(driver, records),
         findById: (id) => findById(driver, id),
         listByExecution: (executionId) => listByExecution(driver, executionId),
     };

@@ -66,6 +66,11 @@ async function runOne(payload, deps) {
         error: result.error,
         durationMs: result.durationMs,
     });
+    // V1.5：execution 终态确定后立即 flush 该 execution 的 IOOR 缓冲，
+    // 使其对后续 trace 查询完整可见（D-IOOR-1 触发点之一）
+    if (deps.ioorRecorder) {
+        await deps.ioorRecorder.flush(executionId);
+    }
     recordWorkflowMetrics(deps.metricsExporter, def.name, result);
     return { executionId, finalStatus: result.status };
 }

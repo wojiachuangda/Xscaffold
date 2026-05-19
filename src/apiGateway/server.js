@@ -70,6 +70,8 @@ function buildDependencies(overrides) {
         queue: overrides.queue || createQueue(parseQueueConfig()),
         executor: overrides.executor || createWorkflowExecutor(nodeRunner),
         ioorRepository: overrides.ioorRepository || buildIoorRepository(overrides.db),
+        // V1.5：暴露同一 recorder 实例，供 workflowController flush / trace lazy flush / main.js shutdown 共用
+        ioorRecorder,
         traceCollector,
         metricsExporter,
     };
@@ -79,7 +81,24 @@ function buildDefaultIoorRecorder(db) {
     return createIoorRecorder({
         ioorRepository: buildIoorRepository(db),
         auditRepository: buildAuditRepository(db),
+        bufferConfig: readIoorBufferConfig(),
     });
+}
+
+/**
+ * 从环境变量读 IOOR 缓冲配置；未设的字段交由 IoorBufferConfigSchema 默认值兜底。
+ */
+function readIoorBufferConfig() {
+    const config = {};
+    const size = Number(process.env.IOOR_BATCH_SIZE);
+    if (Number.isFinite(size) && size > 0) {
+        config.batchSize = Math.floor(size);
+    }
+    const interval = Number(process.env.IOOR_BATCH_INTERVAL_MS);
+    if (Number.isFinite(interval) && interval > 0) {
+        config.intervalMs = Math.floor(interval);
+    }
+    return config;
 }
 
 function buildToolRegistry() {
@@ -208,6 +227,7 @@ function mountProtectedRoutes(app, deps, overrides) {
         buildExecutionTraceRouter({
             executionStore: deps.executionStore,
             ioorRepository: deps.ioorRepository,
+            ioorRecorder: deps.ioorRecorder,
             traceCollector: deps.traceCollector,
         }),
     );
@@ -218,6 +238,7 @@ function mountProtectedRoutes(app, deps, overrides) {
             executionStore: deps.executionStore,
             queue: deps.queue,
             executor: deps.executor,
+            ioorRecorder: deps.ioorRecorder,
             metricsExporter: deps.metricsExporter,
         }),
     );
