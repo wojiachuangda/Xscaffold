@@ -6,7 +6,17 @@ const projectUpdateStatus = require('./projectUpdateStatus');
 const taskList = require('./taskList');
 const taskUpsert = require('./taskUpsert');
 const eventRecord = require('./eventRecord');
+const reminderCreate = require('./reminderCreate');
+const reminderListDue = require('./reminderListDue');
 
-const PROJECT_ASSISTANT_TOOLS = [projectGetStatus, projectUpdateStatus, taskList, taskUpsert, eventRecord];
+const PROJECT_ASSISTANT_TOOLS = [
+    projectGetStatus,
+    projectUpdateStatus,
+    taskList,
+    taskUpsert,
+    eventRecord,
+    reminderCreate,
+    reminderListDue,
+];
 
 module.exports = { PROJECT_ASSISTANT_TOOLS };
