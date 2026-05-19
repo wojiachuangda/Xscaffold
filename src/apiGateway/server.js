@@ -164,8 +164,29 @@ async function handleReadyz(req, res, deps) {
 }
 
 function mountMetricsEndpoint(app, deps, overrides) {
-    const metricsToken = overrides.metricsToken ?? process.env.METRICS_TOKEN;
+    const metricsToken = resolveMetricsToken(overrides);
     app.use('/metrics', buildMetricsRouter({ metricsExporter: deps.metricsExporter, metricsToken }));
+}
+
+/**
+ * 解析 metrics token（V1.1.2 破坏性变更）。
+ *
+ * - 空字符串 / 纯空白 / 未设 一律视为「未配置」
+ * - 生产环境未配置 → 启动期 throw（fail-fast，避免 /metrics 静默匿名暴露）
+ * - 非生产环境未配置 → warn + 返回 undefined（开发/测试零摩擦，guardToken 放行）
+ *
+ * @returns {string|undefined}
+ */
+function resolveMetricsToken(overrides) {
+    const raw = overrides.metricsToken ?? process.env.METRICS_TOKEN;
+    const configured = typeof raw === 'string' && raw.trim() !== '' ? raw : undefined;
+    if (configured === undefined && process.env.NODE_ENV === 'production') {
+        throw new Error('METRICS_TOKEN 必须在生产环境配置非空值（V1.1.2 破坏性变更）');
+    }
+    if (configured === undefined) {
+        logger.warn({}, 'METRICS_TOKEN 未配置：/metrics 当前匿名可访问（生产环境必须配置）');
+    }
+    return configured;
 }
 
 function mountProtectedRoutes(app, deps, overrides) {

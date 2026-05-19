@@ -99,12 +99,70 @@ describe('可观测性 E2E', () => {
         expect(r.status).toBe(404);
     });
 
-    test('METRICS_TOKEN 配置后 /metrics 需要正确头', async () => {
-        const guarded = await bootApp({ metricsToken: 'secret-metrics' });
-        const denied = await request(guarded.app).get('/metrics');
-        expect(denied.status).toBe(401);
-        const allowed = await request(guarded.app).get('/metrics').set('x-metrics-token', 'secret-metrics');
-        expect(allowed.status).toBe(200);
-        await guarded.driver.close();
+    describe('/metrics 强制鉴权（V1.1.2）', () => {
+        let guarded;
+        beforeEach(async () => {
+            guarded = await bootApp({ metricsToken: 'secret-metrics' });
+        });
+        afterEach(async () => {
+            await guarded.driver.close();
+        });
+
+        test('无任何凭据 → 401', async () => {
+            const r = await request(guarded.app).get('/metrics');
+            expect(r.status).toBe(401);
+        });
+
+        test('正确 x-metrics-token 头 → 200（兼容保留）', async () => {
+            const r = await request(guarded.app).get('/metrics').set('x-metrics-token', 'secret-metrics');
+            expect(r.status).toBe(200);
+        });
+
+        test('错误 x-metrics-token 值 → 401', async () => {
+            const r = await request(guarded.app).get('/metrics').set('x-metrics-token', 'wrong-value');
+            expect(r.status).toBe(401);
+        });
+
+        test('正确 Authorization: Bearer 头 → 200', async () => {
+            const r = await request(guarded.app).get('/metrics').set('Authorization', 'Bearer secret-metrics');
+            expect(r.status).toBe(200);
+        });
+
+        test('Bearer scheme 大小写兼容 → 200', async () => {
+            const r = await request(guarded.app).get('/metrics').set('Authorization', 'bearer secret-metrics');
+            expect(r.status).toBe(200);
+        });
+
+        test('错误 Bearer token → 401', async () => {
+            const r = await request(guarded.app).get('/metrics').set('Authorization', 'Bearer wrong-value');
+            expect(r.status).toBe(401);
+        });
+
+        test('Authorization 头存在但格式非法 → 401（不回退 x-metrics-token）', async () => {
+            const r = await request(guarded.app)
+                .get('/metrics')
+                .set('Authorization', 'Bearer')
+                .set('x-metrics-token', 'secret-metrics');
+            expect(r.status).toBe(401);
+        });
+    });
+
+    test('生产环境缺 METRICS_TOKEN → createApp 启动失败（fail-fast）', async () => {
+        const prevEnv = process.env.NODE_ENV;
+        const prevToken = process.env.METRICS_TOKEN;
+        process.env.NODE_ENV = 'production';
+        delete process.env.METRICS_TOKEN;
+        try {
+            await expect(bootApp()).rejects.toThrow(/METRICS_TOKEN 必须在生产环境配置/);
+            // 空字符串同样视为未配置
+            await expect(bootApp({ metricsToken: '' })).rejects.toThrow(/METRICS_TOKEN 必须在生产环境配置/);
+        } finally {
+            process.env.NODE_ENV = prevEnv;
+            if (prevToken === undefined) {
+                delete process.env.METRICS_TOKEN;
+            } else {
+                process.env.METRICS_TOKEN = prevToken;
+            }
+        }
     });
 });

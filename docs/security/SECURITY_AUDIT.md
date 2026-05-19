@@ -26,12 +26,12 @@
 | 检查项 | 状态 | 证据 |
 |--------|------|------|
 | 所有业务路由强制 JWT | ✅ PASS | `apiGateway/server.js:mountProtectedRoutes` 全局挂 `authMiddleware`；豁免仅 `/healthz` `/readyz` `/webhooks` `/metrics` |
-| 无意暴露 `/metrics`（可被探测） | ⚠️ MEDIUM | 默认匿名可访问；通过 `METRICS_TOKEN` 可启用鉴权，已在 `.env.example` 提示 |
+| 无意暴露 `/metrics`（可被探测） | ✅ RESOLVED (v1.6.0) | 生产环境强制 `METRICS_TOKEN`（缺失即启动失败）；timing-safe 比对；详见 §8 |
 | Webhook 路径无鉴权但有签名校验 | ✅ PASS | `webhookSignature.js` HMAC-SHA256 + timing-safe + ±5min 时间窗 |
 | 工作流注册中心可被任意用户列出 | INFO | `GET /workflows` 已强制 JWT；返回信息为名称/版本/节点数，无敏感数据 |
 | 多租户隔离 | INFO | 当前未做；`messages` 表已预留 `tenant_id` 列，V2 落地 |
 
-**评级**：MEDIUM（/metrics 默认开放）— 缓解措施已就位（METRICS_TOKEN 可启用）
+**评级**：✅ RESOLVED（v1.6.0：生产强制 METRICS_TOKEN + timing-safe 比对）
 
 ---
 
@@ -244,3 +244,22 @@ dependencies:    { prod:158, dev:645, optional:2, peer:1, total:802 }
 **CRITICAL: 0 | HIGH: 0 | MEDIUM: 3 | INFO: 2**
 
 剩余 INFO：插件签名 / 插件来源校验（V2 / V1.5）
+
+---
+
+## 8. V1.1.2 修复说明 (2026-05-20)
+
+### 8.1 `/metrics` 强制鉴权 (MEDIUM → ✅ RESOLVED)
+- `guardToken` 移除「`METRICS_TOKEN` 未配置即匿名放行」分支。
+- `server.js` 启动期断言：`NODE_ENV=production` 且 `METRICS_TOKEN` 为空/未设 → 进程启动 `throw`（fail-fast）。空字符串与纯空白一律视为未配置，不能绕过。
+- 非生产环境未配置时仍匿名放行，但打 `warn` 日志（开发零摩擦）。
+- token 比对从 `!==` 改为恒定时间比较，杜绝时序侧信道。
+- 鉴权头支持标准 `Authorization: Bearer <token>`（scheme 大小写兼容）与兼容保留的 `x-metrics-token`；`Authorization` 头一旦出现即走 Bearer 路径，不回退。
+
+### 8.2 timing-safe 比对 helper 抽出
+- 新增 `src/infrastructure/security/timingSafe.js` `timingSafeStringEqual`，`/metrics` 与 `webhookSignature` HMAC 校验共用，消除内联重复。
+
+### 8.3 更新后评级
+**CRITICAL: 0 | HIGH: 0 | MEDIUM: 2 | INFO: 2**
+
+剩余 MEDIUM：插件信任边界 / 插件来源校验（V2 / V1.5 路线图）

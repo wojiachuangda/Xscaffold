@@ -4,6 +4,7 @@
 const crypto = require('crypto');
 
 const { AuthError } = require('../../infrastructure/errors/AppError');
+const { timingSafeStringEqual } = require('../../infrastructure/security/timingSafe');
 
 const DEFAULT_TIME_WINDOW_MS = 5 * 60 * 1000;
 const SIGNATURE_HEADER = 'x-hub-signature-256';
@@ -42,12 +43,7 @@ function createGithubSignatureMiddleware(options) {
 
 function verifySignature(rawBody, secret, headerSig) {
     const expected = `sha256=${crypto.createHmac('sha256', secret).update(rawBody).digest('hex')}`;
-    const a = Buffer.from(expected);
-    const b = Buffer.from(String(headerSig));
-    if (a.length !== b.length) {
-        return false;
-    }
-    return crypto.timingSafeEqual(a, b);
+    return timingSafeStringEqual(expected, String(headerSig));
 }
 
 function isWithinTimeWindow(tsHeader, windowMs) {
