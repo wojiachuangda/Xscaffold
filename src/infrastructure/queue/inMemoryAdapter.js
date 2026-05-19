@@ -1,4 +1,4 @@
-// [scaffold] ID: T4.5 | Date: 2026-05-18 | Description: 内存队列适配器（MVP 默认）——单进程异步任务派发
+// [refactor] ID: V1.5-B | Date: 2026-05-20 | Description: 内存队列适配器——单进程异步任务派发；V1.5-B 起 enqueue/getJob/close 改 async 以对齐统一契约
 'use strict';
 
 const crypto = require('crypto');
@@ -7,21 +7,30 @@ const { EventEmitter } = require('events');
 const { logger } = require('../../observability/logger');
 
 /**
- * 队列接口契约：
- *   enqueue(name, payload) -> { jobId }
- *   getJob(jobId)          -> { id, name, status, result, error }
- *   process(name, worker)  -> 注册 worker（每队列一个）
- *   onJobComplete(handler) -> 完成回调
- *   close()                -> 释放资源
+ * 队列接口契约（V1.5-B 统一异步化）：
+ *   async enqueue(name, payload) -> { jobId }
+ *   async getJob(jobId)          -> { id, name, status, result, error, createdAt, finishedAt } | null
+ *   process(name, worker)        -> 注册 worker（每队列一个）
+ *   onJobComplete(handler)       -> 完成回调
+ *   async close()                -> 释放资源
  */
 function createInMemoryAdapter() {
     const state = { jobs: new Map(), workers: new Map(), events: new EventEmitter() };
     return {
-        enqueue: (name, payload) => enqueueJob(state, name, payload),
-        getJob: (jobId) => getJob(state, jobId),
+        // eslint-disable-next-line require-await
+        async enqueue(name, payload) {
+            return enqueueJob(state, name, payload);
+        },
+        // eslint-disable-next-line require-await
+        async getJob(jobId) {
+            return getJob(state, jobId);
+        },
         process: (name, worker) => registerWorker(state, name, worker),
         onJobComplete: (handler) => state.events.on('complete', handler),
-        close: () => closeState(state),
+        // eslint-disable-next-line require-await
+        async close() {
+            closeState(state);
+        },
     };
 }
 

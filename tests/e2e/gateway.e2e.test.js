@@ -77,9 +77,9 @@ describe('接入层 E2E', () => {
         ctx = await bootApp();
         token = signTestToken({ sub: 'u1', role: 'admin' }, JWT_SECRET);
     });
-    afterEach(() => {
-        ctx.queue.close();
-        ctx.driver.close();
+    afterEach(async () => {
+        await ctx.queue.close();
+        await ctx.driver.close();
     });
 
     test('未鉴权访问 /workflows → 401', async () => {
@@ -171,7 +171,7 @@ describe('接入层 E2E', () => {
         expect(r1.status).toBe(200);
         expect(r2.status).toBe(200);
         expect(r3.status).toBe(200);
-        limited.queue.close();
+        await limited.queue.close();
         await limited.driver.close();
     });
 });

@@ -48,7 +48,7 @@ async function handleGithub(req, res, deps, githubConfig) {
     }
     const payload = parseRawBody(req.body);
     const execution = await deps.executionStore.create({ workflowId, input: payload });
-    deps.queue.enqueue(WORKFLOW_QUEUE, {
+    await deps.queue.enqueue(WORKFLOW_QUEUE, {
         workflowId,
         executionId: execution.id,
         input: payload,

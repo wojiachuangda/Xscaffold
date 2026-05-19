@@ -80,7 +80,7 @@ function recordWorkflowMetrics(metricsExporter, workflowName, result) {
 async function triggerExecute(req, res, deps) {
     const def = deps.workflowRegistry.get(req.params.id);
     const execution = await deps.executionStore.create({ workflowId: req.params.id, input: req.body.input || null });
-    deps.queue.enqueue(WORKFLOW_QUEUE, {
+    await deps.queue.enqueue(WORKFLOW_QUEUE, {
         workflowId: req.params.id,
         executionId: execution.id,
         input: req.body.input || null,

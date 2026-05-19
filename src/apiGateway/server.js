@@ -20,7 +20,7 @@ const { buildWorkflowRouter } = require('./controllers/workflowController');
 const { buildWebhookRouter } = require('./controllers/webhookController');
 const { buildExecutionTraceRouter, buildMetricsRouter } = require('./controllers/observabilityController');
 
-const { createInMemoryAdapter } = require('../infrastructure/queue/inMemoryAdapter');
+const { parseQueueConfig, createQueue } = require('../infrastructure/queue');
 const { createWorkflowRegistry, loadFromDirectorySync } = require('../workflowEngine/workflowRegistry');
 const { buildExecutionStore } = require('../workflowEngine/executionStore');
 const { createNodeRunner } = require('../workflowEngine/nodeRunner');
@@ -41,6 +41,8 @@ function createApp(overrides = {}) {
     const app = express();
     app.disable('x-powered-by');
     const deps = buildDependencies(overrides);
+    // 暴露依赖到 app.locals.deps —— main.js 优雅停机时需要 await deps.queue.close()
+    app.locals.deps = deps;
     mountHealthAndWebhooks(app, deps, overrides);
     mountMetricsEndpoint(app, deps, overrides);
     mountProtectedRoutes(app, deps, overrides);
@@ -65,7 +67,7 @@ function buildDependencies(overrides) {
         agentService,
         workflowRegistry: overrides.workflowRegistry || buildWorkflowRegistryWithAutoload(overrides),
         executionStore: overrides.executionStore || buildExecutionStore(overrides.db),
-        queue: overrides.queue || createInMemoryAdapter(),
+        queue: overrides.queue || createQueue(parseQueueConfig()),
         executor: overrides.executor || createWorkflowExecutor(nodeRunner),
         ioorRepository: overrides.ioorRepository || buildIoorRepository(overrides.db),
         traceCollector,
