@@ -3,8 +3,9 @@
 
 const crypto = require('crypto');
 
+const { ExecutionStatusSchema } = require('./executionSchema');
 const { getDb } = require('../infrastructure/database/connection');
-const { NotFoundError } = require('../infrastructure/errors/AppError');
+const { NotFoundError, ValidationError } = require('../infrastructure/errors/AppError');
 
 function generateId() {
     return `exec_${crypto.randomBytes(8).toString('hex')}`;
@@ -25,6 +26,19 @@ function rowToEntity(row) {
         finishedAt: row.finished_at,
         durationMs: row.duration_ms,
     };
+}
+
+function assertValidStatus(status) {
+    const parsed = ExecutionStatusSchema.safeParse(status);
+    if (!parsed.success) {
+        throw new ValidationError('Execution status 不合法', [
+            {
+                path: 'status',
+                code: 'invalid_enum_value',
+                message: 'status must be PENDING/RUNNING/SUCCESS/FAILED/STUCK/TIMEOUT',
+            },
+        ]);
+    }
 }
 
 function buildExecutionStore(driverOrUndefined) {
@@ -55,6 +69,7 @@ function buildExecutionStore(driverOrUndefined) {
     }
 
     async function markFinal(id, { status, result, error, durationMs }) {
+        assertValidStatus(status);
         const finishedAt = new Date().toISOString();
         await driver.run(
             `UPDATE executions

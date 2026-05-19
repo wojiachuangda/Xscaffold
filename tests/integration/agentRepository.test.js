@@ -4,7 +4,7 @@
 const { createSqliteDriver } = require('../../src/infrastructure/database/drivers/sqliteDriver');
 const { buildRepository } = require('../../src/agentManager/agentRepository');
 const { migrate } = require('../../src/infrastructure/database/migrate');
-const { ConflictError, NotFoundError } = require('../../src/infrastructure/errors/AppError');
+const { ConflictError, NotFoundError, ValidationError } = require('../../src/infrastructure/errors/AppError');
 
 async function createRepo() {
     const driver = createSqliteDriver({ filename: ':memory:' });
@@ -80,6 +80,14 @@ describe('agentRepository', () => {
 
     test('update 不存在 → NotFoundError', async () => {
         await expect(ctx.repo.update('nope', { status: 'disabled' })).rejects.toThrow(NotFoundError);
+    });
+
+    test('非法 status → 应用层契约拒绝', async () => {
+        const a = await ctx.repo.create({ name: 'status-check', model: 'm' });
+        await expect(ctx.repo.update(a.id, { status: 'INVALID' })).rejects.toThrow(ValidationError);
+        await expect(ctx.repo.create({ name: 'bad-status', model: 'm', status: 'INVALID' })).rejects.toThrow(
+            ValidationError,
+        );
     });
 
     test('update 改名冲突 → ConflictError', async () => {

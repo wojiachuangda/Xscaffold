@@ -5,7 +5,7 @@ const { createSqliteDriver } = require('../../src/infrastructure/database/driver
 
 const { migrate } = require('../../src/infrastructure/database/migrate');
 const { buildExecutionStore } = require('../../src/workflowEngine/executionStore');
-const { NotFoundError } = require('../../src/infrastructure/errors/AppError');
+const { NotFoundError, ValidationError } = require('../../src/infrastructure/errors/AppError');
 
 async function bootStore() {
     const driver = createSqliteDriver({ filename: ':memory:' });
@@ -59,8 +59,8 @@ describe('executionStore', () => {
         await expect(ctx.store.requireById('exec_xyz')).rejects.toThrow(NotFoundError);
     });
 
-    test('非法 status → CHECK 约束拒绝', async () => {
+    test('非法 status → 应用层契约拒绝', async () => {
         const e = await ctx.store.create({ workflowId: 'wf1', input: null });
-        await expect(ctx.store.markFinal(e.id, { status: 'WAT', durationMs: 0 })).rejects.toThrow();
+        await expect(ctx.store.markFinal(e.id, { status: 'WAT', durationMs: 0 })).rejects.toThrow(ValidationError);
     });
 });

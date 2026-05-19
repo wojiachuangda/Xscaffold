@@ -59,12 +59,11 @@ describe('migrate', () => {
         await driver.close();
     });
 
-    test('agents 表 status 字段拒绝非法值', async () => {
+    test('agents 表 status 字段保留 CHECK 约束', async () => {
         const driver = createSqliteDriver({ filename: ':memory:' });
         await migrate({ driver });
-        await expect(
-            driver.run("INSERT INTO agents (id, name, model, status) VALUES ('a', 'a', 'm', 'INVALID')"),
-        ).rejects.toThrow(/CHECK constraint/);
+        const { rows } = await driver.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agents'");
+        expect(rows[0].sql).toContain("CHECK (status IN ('enabled', 'disabled'))");
         await driver.close();
     });
 

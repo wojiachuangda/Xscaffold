@@ -3,8 +3,9 @@
 
 const crypto = require('crypto');
 
+const { AgentStatusSchema } = require('./agentSchema');
 const { getDb } = require('../infrastructure/database/connection');
-const { ConflictError, NotFoundError } = require('../infrastructure/errors/AppError');
+const { ConflictError, NotFoundError, ValidationError } = require('../infrastructure/errors/AppError');
 
 function rowToEntity(row) {
     if (!row) {
@@ -28,6 +29,15 @@ function nowIso() {
 
 function generateId() {
     return `agent_${crypto.randomBytes(8).toString('hex')}`;
+}
+
+function assertValidStatus(status) {
+    const parsed = AgentStatusSchema.safeParse(status);
+    if (!parsed.success) {
+        throw new ValidationError('Agent status 不合法', [
+            { path: 'status', code: 'invalid_enum_value', message: 'status must be enabled or disabled' },
+        ]);
+    }
 }
 
 async function findById(driver, id) {
@@ -70,6 +80,7 @@ async function findAll(driver, filter = {}) {
 }
 
 async function insertAgent(driver, id, input, ts) {
+    assertValidStatus(input.status ?? 'enabled');
     await driver.run(
         `INSERT INTO agents (id, name, description, model, tools, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -101,6 +112,7 @@ async function create(driver, input) {
 }
 
 async function updateAgentRow(driver, id, next) {
+    assertValidStatus(next.status);
     await driver.run(
         `UPDATE agents SET name = ?, description = ?, model = ?, tools = ?, status = ?, updated_at = ?
          WHERE id = ?`,

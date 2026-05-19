@@ -4,6 +4,7 @@
 const { createSqliteDriver } = require('../../src/infrastructure/database/drivers/sqliteDriver');
 const { migrate } = require('../../src/infrastructure/database/migrate');
 const { buildMemoryRepository } = require('../../src/memoryManager/memoryRepository');
+const { ValidationError } = require('../../src/infrastructure/errors/AppError');
 
 async function bootRepo() {
     const driver = createSqliteDriver({ filename: ':memory:' });
@@ -61,7 +62,9 @@ describe('memoryRepository', () => {
         expect(await ctx.repo.listRecent('s', 10)).toEqual([]);
     });
 
-    test('非法 role → CHECK 约束拒绝', async () => {
-        await expect(ctx.repo.insert({ sessionId: 's', role: 'invalid', content: 'x' })).rejects.toThrow(/CHECK/);
+    test('非法 role → 应用层契约拒绝', async () => {
+        await expect(ctx.repo.insert({ sessionId: 's', role: 'invalid', content: 'x' })).rejects.toThrow(
+            ValidationError,
+        );
     });
 });
