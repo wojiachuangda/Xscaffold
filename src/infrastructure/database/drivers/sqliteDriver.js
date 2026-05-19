@@ -41,7 +41,8 @@ function buildAsyncSurface(db) {
         async transaction(fn) {
             db.prepare('BEGIN').run();
             try {
-                const result = await fn(buildAsyncSurface(db));
+                // 事务句柄需带 isUniqueViolation：repo 方法在事务内撞唯一约束时要靠它归一化
+                const result = await fn({ ...buildAsyncSurface(db), isUniqueViolation });
                 db.prepare('COMMIT').run();
                 return result;
             } catch (err) {

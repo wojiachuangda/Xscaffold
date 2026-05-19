@@ -59,8 +59,8 @@
 
 #### Tests
 - 新增 `tests/unit/pgDriver.test.js` — 17 个纯函数单测覆盖占位符重写、`isUniqueViolation`、`parseDatabaseUrl` 协议识别、`PG_POOL_MAX` 解析
-- 新增 `tests/integration/postgresAdapter.integration.test.js` — 8 个真 PG 集成用例（migrate 跑全 8 迁移 / `xs_iso_now()` 格式 / UNIQUE→ConflictError / IOOR JSONB 往返 / JSONB 类型核查 / GIN 索引就位 / ROLLBACK 隔离 / COMMIT 持久化），用独立 env `PG_TEST_URL` 触发；未设置 → 整 suite skip
-- A.2 落地后本地基线：**482 passed / 8 skipped / 0 failed**
+- 新增 `tests/integration/postgresAdapter.integration.test.js` — 真 PG 集成用例（migrate 跑全 8 迁移 / `xs_iso_now()` 格式 / UNIQUE→ConflictError / IOOR JSONB 往返 / JSONB 类型核查 / GIN 索引就位 / ROLLBACK 隔离 / COMMIT 持久化 / 事务内 UNIQUE 归一），用独立 env `PG_TEST_URL` 触发；未设置 → 整 suite skip
+- A.2 落地后本地基线：**482 passed / 9 skipped / 0 failed**（PG 集成 suite 本地无 PG 故 skip）
 
 ---
 
@@ -72,9 +72,14 @@
 - **`.github/workflows/ci.yml` 新增 `test-postgres` job**：
   - `services: postgres:16`，`pg_isready` 健康检查，10 次重试
   - 注入 `PG_TEST_URL=postgres://postgres:postgres@localhost:5432/postgres`
-  - 跑 `npm test` —— SQLite 默认 482 + 真 PG unskip 8 = **490/490** 期望
+  - 跑 `npm test` —— SQLite 默认 482 + 真 PG unskip 9 = **491/491** 期望
   - 独立 job，与 `lint-and-test` 并行，**不污染既有 SQLite job 的失败信号**
 - `package.json.version` → `1.4.0`
+
+#### Fixed（CI 首跑 PG 路径暴露）
+- `postgresAdapter.integration.test.js` 误把 `agentRepository` / `ioorRepository` 当直接导出方法调用；二者实为工厂模块（`buildRepository(driver)` / `buildIoorRepository(driver)`）。改用工厂 API。
+- `pgDriver` / `sqliteDriver` 的事务回调句柄缺 `isUniqueViolation` —— repo 方法在事务内撞唯一约束会 `TypeError`。两 driver 的事务句柄补齐该谓词。
+- 新增「事务内 UNIQUE 冲突仍归一为 `ConflictError`」集成用例覆盖上述修复，PG 集成用例 8 → 9。
 
 #### Docs
 - `README.md` 配置段补 PG 协议示例（badge 风格保持历史不动）

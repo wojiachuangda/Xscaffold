@@ -3,8 +3,8 @@
 
 const { createDriver, parseDatabaseUrl } = require('../../src/infrastructure/database/drivers');
 const { migrate } = require('../../src/infrastructure/database/migrate');
-const agentRepository = require('../../src/agentManager/agentRepository');
-const ioorRepository = require('../../src/observability/ioorRepository');
+const { buildRepository } = require('../../src/agentManager/agentRepository');
+const { buildIoorRepository } = require('../../src/observability/ioorRepository');
 const { ConflictError } = require('../../src/infrastructure/errors/AppError');
 
 const PG_URL = process.env.PG_TEST_URL;
@@ -55,10 +55,11 @@ describeIfPg('PostgreSQL Driver 集成测试', () => {
     });
 
     test('agent UNIQUE 冲突触发 ConflictError', async () => {
-        await agentRepository.create(driver, { name: 'pg-conflict-test', model: 'gpt-4', tools: [] });
-        await expect(
-            agentRepository.create(driver, { name: 'pg-conflict-test', model: 'gpt-4', tools: [] }),
-        ).rejects.toBeInstanceOf(ConflictError);
+        const agents = buildRepository(driver);
+        await agents.create({ name: 'pg-conflict-test', model: 'gpt-4', tools: [] });
+        await expect(agents.create({ name: 'pg-conflict-test', model: 'gpt-4', tools: [] })).rejects.toBeInstanceOf(
+            ConflictError,
+        );
     });
 
     test('IOOR JSONB 字段往返一致（写入对象 → 读取等值对象）', async () => {
@@ -77,7 +78,7 @@ describeIfPg('PostgreSQL Driver 集成测试', () => {
             tokenUsage: { prompt: 10, completion: 5 },
             latencyMs: 123,
         };
-        const inserted = await ioorRepository.insertRecord(driver, record);
+        const inserted = await buildIoorRepository(driver).insert(record);
         expect(inserted.input).toEqual(record.input);
         expect(inserted.output).toEqual(record.output);
         expect(inserted.toolCalls).toEqual(record.toolCalls);
@@ -113,7 +114,7 @@ describeIfPg('PostgreSQL Driver 集成测试', () => {
         const probeName = `pg-txn-rollback-${Date.now()}`;
         await expect(
             driver.transaction(async (trx) => {
-                await agentRepository.create(trx, { name: probeName, model: 'gpt-4', tools: [] });
+                await buildRepository(trx).create({ name: probeName, model: 'gpt-4', tools: [] });
                 throw new Error('故意失败');
             }),
         ).rejects.toThrow('故意失败');
@@ -125,10 +126,20 @@ describeIfPg('PostgreSQL Driver 集成测试', () => {
     test('transaction 正常 COMMIT 持久化写入', async () => {
         const probeName = `pg-txn-commit-${Date.now()}`;
         await driver.transaction(async (trx) => {
-            await agentRepository.create(trx, { name: probeName, model: 'gpt-4', tools: ['t1', 't2'] });
+            await buildRepository(trx).create({ name: probeName, model: 'gpt-4', tools: ['t1', 't2'] });
         });
         const { rows } = await driver.query('SELECT name, tools FROM agents WHERE name = ?', [probeName]);
         expect(rows.length).toBe(1);
         expect(JSON.parse(rows[0].tools)).toEqual(['t1', 't2']);
+    });
+
+    test('transaction 内撞 UNIQUE 约束仍归一为 ConflictError', async () => {
+        const dupName = `pg-txn-conflict-${Date.now()}`;
+        await buildRepository(driver).create({ name: dupName, model: 'gpt-4', tools: [] });
+        await expect(
+            driver.transaction(async (trx) => {
+                await buildRepository(trx).create({ name: dupName, model: 'gpt-4', tools: [] });
+            }),
+        ).rejects.toBeInstanceOf(ConflictError);
     });
 });

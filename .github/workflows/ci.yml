@@ -102,7 +102,7 @@ jobs:
       - name: Rebuild better-sqlite3 from source
         run: npm rebuild better-sqlite3 --build-from-source
 
-      - name: Test (SQLite default 482 + PG integration 8 全跑)
+      - name: Test (SQLite default 482 + PG integration 9 全跑)
         run: npm test
 
   secret-scan:

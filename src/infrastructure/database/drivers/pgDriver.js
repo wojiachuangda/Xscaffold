@@ -85,6 +85,8 @@ async function runTransaction(pool, fn) {
         await client.query('BEGIN');
         const trxSurface = {
             ...buildSurface(client),
+            // 事务句柄需带 isUniqueViolation：repo 方法在事务内撞唯一约束时要靠它归一化
+            isUniqueViolation,
             transaction: () => {
                 throw new Error('嵌套事务暂不支持');
             },
