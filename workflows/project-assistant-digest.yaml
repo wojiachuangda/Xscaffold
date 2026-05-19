@@ -1,0 +1,71 @@
+# [planner] ID: PAM-8 | Date: 2026-05-19 | Description: 项目助理摘要闭环工作流（7 个 tool 节点顺序串联）
+name: project-assistant-digest
+version: '1.0'
+description: 读取项目状态 → 列任务/到期提醒 → 询问外部 Agent → 记录事件 → 更新摘要 → 生成 digest
+nodes:
+  - id: status
+    type: tool
+    toolName: projectGetStatus
+    description: 读取项目当前状态
+    params:
+      projectId: "{{projectId}}"
+
+  - id: tasks
+    type: tool
+    toolName: taskList
+    description: 列出项目任务
+    params:
+      projectId: "{{projectId}}"
+
+  - id: reminders
+    type: tool
+    toolName: reminderListDue
+    description: 查询未来 24h 内到期的提醒
+    params:
+      projectId: "{{projectId}}"
+      before: "{{reminderBefore}}"
+
+  - id: external
+    type: tool
+    toolName: externalAgentSend
+    description: 调用外部常驻 Agent 获取分析
+    params:
+      projectId: "{{projectId}}"
+      profile: "{{profile}}"
+      sessionId: "{{sessionId}}"
+      instruction: "{{instruction}}"
+
+  - id: recordEvent
+    type: tool
+    toolName: eventRecord
+    description: 记录"摘要已生成"事件
+    params:
+      projectId: "{{projectId}}"
+      type: digest_generated
+      title: 项目摘要已生成
+      severity: normal
+
+  - id: updateStatus
+    type: tool
+    toolName: projectUpdateStatus
+    description: 将外部 Agent 的 summary 写回项目状态
+    params:
+      projectId: "{{projectId}}"
+      summary: "{{external.data.summary}}"
+
+  - id: digest
+    type: tool
+    toolName: projectGenerateDigest
+    description: 生成最终 markdown 摘要
+    params:
+      projectId: "{{projectId}}"
+      range: daily
+      format: markdown
+
+edges:
+  - { from: status, to: tasks }
+  - { from: tasks, to: reminders }
+  - { from: reminders, to: external }
+  - { from: external, to: recordEvent }
+  - { from: recordEvent, to: updateStatus }
+  - { from: updateStatus, to: digest }
