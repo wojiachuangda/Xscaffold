@@ -4,6 +4,32 @@
 
 ---
 
+## [1.1.1] - 2026-05-19
+
+### 🛡️ CI 依赖审计集成（OWASP A06）
+
+聚焦闭环 PROJECT_CLOSURE §5 backlog 高优先级 #1，无运行时代码改动。
+
+### CI / Chore
+- **新增 `dependency-audit` job** — `.github/workflows/ci.yml`：
+  - 独立 job，与 `lint-and-test` / `secret-scan` 并列；失败可见性独立
+  - 触发：`push` / `pull_request`（main, develop）+ 每日 `cron '17 3 * * *'`（UTC）
+  - 失败时上传 `audit.json` artifact（retention 7 天）
+- **新增 `npm run audit:ci`** — `package.json`：
+  - `npm audit --omit=dev --audit-level=high`
+  - 仅审计 production 依赖（158 个），避免 dev 噪音
+  - 阈值 `high`：high + critical 阻塞 CI
+
+### Docs
+- `SECURITY_AUDIT.md` 中 INFO 级「npm audit 未集成」标记为已解决
+
+### Security Posture
+**CRITICAL: 0 | HIGH: 0 | MEDIUM: 3 | INFO: 2 (was 3)**
+
+当前依赖审计基线：0 漏洞（prod 158 / dev 645 / total 802）
+
+---
+
 ## [1.1.0] - 2026-05-19
 
 ### 🔒 安全与成本加固
@@ -139,16 +165,15 @@
 
 ## [Unreleased]
 
-### Planned for V1.1
-- `httpRequest` URL 白名单（修复 SSRF）
-- LLM token 配额与熔断
-- PostgreSQL 适配（Repository 抽象已就位，零代码改动）
-- `npm audit` 集成到 CI
+### Planned for V1.1.x
+- `/metrics` 默认强制 `METRICS_TOKEN`（向后破坏，攒到 v1.2）
 
 ### Planned for V1.5
+- PostgreSQL 适配器（Repository 抽象已就位）
 - BullMQ + Redis 队列适配器
 - IOOR 批量缓冲写入
 - Pino transport worker 异步日志
+- 插件来源校验（package.json signature）
 
 ### Planned for V2
 - 插件 sandbox (`isolated-vm`)
@@ -156,3 +181,4 @@
 - 向量数据库长期记忆
 - OpenTelemetry SDK 接入
 - 多租户 `tenant_id` 下钻
+- LangChain.js 编排辅助评估

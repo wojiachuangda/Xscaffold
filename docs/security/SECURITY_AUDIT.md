@@ -91,10 +91,10 @@
 | 检查项 | 状态 | 证据 |
 |--------|------|------|
 | 依赖版本固定 | ✅ PASS | `package-lock.json` 已提交 |
-| 已知 CVE 扫描 | ⚠️ INFO | `npm audit` 未集成到 CI；建议 V1.1 加入 `npm audit --audit-level=high` |
+| 已知 CVE 扫描 | ✅ PASS | **v1.1.1 集成**：CI `dependency-audit` job 跑 `npm audit --omit=dev --audit-level=high`；PR/push + 每日 cron；当前 0 漏洞（prod 158 / dev 645） |
 | 主依赖维护活跃度 | ✅ PASS | express/zod/pino/jsonwebtoken/better-sqlite3 均为活跃维护 |
 
-**评级**：INFO（V1.1 加 npm audit gate）
+**评级**：PASS（v1.1.1 闭环）
 
 ---
 
@@ -172,7 +172,7 @@
 2. **MEDIUM - 插件沙箱**：当前进程内执行，仅信任本地 `./plugins/` 目录
 3. **MEDIUM - /metrics 默认开放**：未设 `METRICS_TOKEN` 时匿名可拉取
 4. **MEDIUM - LLM token 配额**：无 per-execution 上限，依赖 provider 端限流
-5. **INFO - npm audit**：未集成到 CI
+5. ~~**INFO - npm audit**：未集成到 CI~~ → ✅ **v1.1.1 已修复**（见 §7）
 6. **INFO - 插件签名**：无完整性校验
 
 ---
@@ -220,3 +220,27 @@ v1.0.0 **可发布**，前提：发布说明中明确披露 SSRF 已知限制 + 
 - 插件签名（V2）
 - npm audit 集成 CI（V1.1.1）
 - 插件来源校验（V1.5）
+
+---
+
+## 7. V1.1.1 修复说明 (2026-05-19)
+
+### 7.1 npm audit CI 集成 (INFO → ✅ RESOLVED)
+- `.github/workflows/ci.yml` 新增独立 `dependency-audit` job：
+  - 触发：`push` / `pull_request`（main, develop）+ 每日 `cron '17 3 * * *'` UTC
+  - 失败时上传 `audit.json` artifact（retention 7 天）
+- `package.json` 新增 `npm run audit:ci`：
+  - `npm audit --omit=dev --audit-level=high`
+  - 仅审计 production 依赖（158 个），避免 dev 噪音
+  - 阈值 `high`：high + critical 阻塞 CI
+
+### 7.2 当前依赖审计基线
+```
+vulnerabilities: { info:0, low:0, moderate:0, high:0, critical:0, total:0 }
+dependencies:    { prod:158, dev:645, optional:2, peer:1, total:802 }
+```
+
+### 7.3 更新后评级
+**CRITICAL: 0 | HIGH: 0 | MEDIUM: 3 | INFO: 2**
+
+剩余 INFO：插件签名 / 插件来源校验（V2 / V1.5）

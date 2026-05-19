@@ -1,6 +1,6 @@
 {
   "name": "xscaffold",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Agentic App Platform - 声明式智能应用编排平台",
   "license": "ISC",
   "author": "",
@@ -20,6 +20,7 @@
     "bench:server": "node scripts/perf/perf-server.js",
     "lint": "eslint src tests scripts",
     "lint:fix": "eslint src tests scripts --fix",
+    "audit:ci": "npm audit --omit=dev --audit-level=high",
     "format": "prettier --write \"src/**/*.js\" \"tests/**/*.js\" \"scripts/**/*.js\"",
     "format:check": "prettier --check \"src/**/*.js\" \"tests/**/*.js\" \"scripts/**/*.js\"",
     "prepare": "husky"
