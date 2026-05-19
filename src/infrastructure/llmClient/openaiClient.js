@@ -34,7 +34,7 @@ function createOpenAIClient(options = {}) {
             throw new LLMError('OPENAI_API_KEY 未配置');
         }
         const body = buildRequestBody({ model, messages, temperature, maxTokens });
-        return invokeWithRetry({ fetchImpl, baseUrl, apiKey, body, timeoutMs, retries });
+        return await invokeWithRetry({ fetchImpl, baseUrl, apiKey, body, timeoutMs, retries });
     }
 
     return { chat };

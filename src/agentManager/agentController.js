@@ -1,4 +1,4 @@
-// [scaffold] ID: T1.5 | Date: 2026-05-18 | Description: Agent REST 路由控制器（仅抛 AppError，由全局中间件兜底）
+// [refactor] ID: V1.5-A.1-S6 | Date: 2026-05-19 | Description: Agent REST 路由控制器（async service；仅抛 AppError 由全局中间件兜底）
 'use strict';
 
 const express = require('express');
@@ -21,7 +21,7 @@ function buildRouter(service) {
         '/',
         validate({ body: CreateAgentSchema }),
         asyncHandler(async (req, res) => {
-            const agent = service.createAgent(req.body);
+            const agent = await service.createAgent(req.body);
             res.status(201).json(success(agent));
         }),
     );
@@ -30,7 +30,7 @@ function buildRouter(service) {
         '/',
         validate({ query: ListAgentsFilterSchema }),
         asyncHandler(async (req, res) => {
-            const { items, total } = service.listAgents(req.query);
+            const { items, total } = await service.listAgents(req.query);
             res.json(success(items, { total, limit: req.query.limit, offset: req.query.offset }));
         }),
     );
@@ -39,7 +39,7 @@ function buildRouter(service) {
         '/:id',
         validate({ params: IdParamSchema }),
         asyncHandler(async (req, res) => {
-            res.json(success(service.getAgentById(req.params.id)));
+            res.json(success(await service.getAgentById(req.params.id)));
         }),
     );
 
@@ -47,7 +47,7 @@ function buildRouter(service) {
         '/:id',
         validate({ params: IdParamSchema, body: UpdateAgentSchema }),
         asyncHandler(async (req, res) => {
-            res.json(success(service.updateAgent(req.params.id, req.body)));
+            res.json(success(await service.updateAgent(req.params.id, req.body)));
         }),
     );
 
@@ -55,7 +55,7 @@ function buildRouter(service) {
         '/:id',
         validate({ params: IdParamSchema }),
         asyncHandler(async (req, res) => {
-            res.json(success(service.deleteAgent(req.params.id)));
+            res.json(success(await service.deleteAgent(req.params.id)));
         }),
     );
 

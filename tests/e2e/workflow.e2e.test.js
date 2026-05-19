@@ -1,7 +1,7 @@
 // [test] ID: T2.9 | Date: 2026-05-18 | Description: 工作流端到端测试（Agent + 工具 + 条件分支 + 输出传递）
 'use strict';
 
-const Database = require('better-sqlite3');
+const { createSqliteDriver } = require('../../src/infrastructure/database/drivers/sqliteDriver');
 
 const { migrate } = require('../../src/infrastructure/database/migrate');
 const { buildRepository } = require('../../src/agentManager/agentRepository');
@@ -13,10 +13,10 @@ const { registerBuiltins } = require('../../src/toolRegistry/builtinTools');
 const { createNodeRunner } = require('../../src/workflowEngine/nodeRunner');
 const { createWorkflowExecutor } = require('../../src/workflowEngine/workflowExecutor');
 
-function bootEnv() {
-    const db = new Database(':memory:');
-    migrate({ db });
-    const agentService = buildAgentService(buildRepository(db));
+async function bootEnv() {
+    const driver = createSqliteDriver({ filename: ':memory:' });
+    await migrate({ driver });
+    const agentService = buildAgentService(buildRepository(driver));
     const toolRegistry = createRegistry();
     registerBuiltins(toolRegistry);
 
@@ -39,19 +39,19 @@ function bootEnv() {
 
     const nodeRunner = createNodeRunner({ toolRegistry, agentService, llmClient });
     const executor = createWorkflowExecutor(nodeRunner);
-    return { db, agentService, toolRegistry, llmClient, executor, llmCalls };
+    return { driver, agentService, toolRegistry, llmClient, executor, llmCalls };
 }
 
 describe('工作流端到端', () => {
     let env;
-    beforeEach(() => {
-        env = bootEnv();
+    beforeEach(async () => {
+        env = await bootEnv();
     });
-    afterEach(() => env.db.close());
+    afterEach(() => env.driver.close());
 
     test('US-01：两个 Agent 顺序执行，下游读取上游输出', async () => {
-        const planner = env.agentService.createAgent({ name: 'planner', model: 'gpt-3.5-turbo' });
-        const executor = env.agentService.createAgent({ name: 'executor', model: 'gpt-3.5-turbo' });
+        const planner = await env.agentService.createAgent({ name: 'planner', model: 'gpt-3.5-turbo' });
+        const executor = await env.agentService.createAgent({ name: 'executor', model: 'gpt-3.5-turbo' });
 
         const r = await env.executor.execute({
             name: 'two-agents',
@@ -94,7 +94,7 @@ describe('工作流端到端', () => {
 
     test('节点失败 → 工作流状态 FAILED + 错误透出', async () => {
         env.llmClient.chat.mockRejectedValue(new Error('mock failure'));
-        const a = env.agentService.createAgent({ name: 'flaky', model: 'gpt-3.5-turbo' });
+        const a = await env.agentService.createAgent({ name: 'flaky', model: 'gpt-3.5-turbo' });
         const r = await env.executor.execute({
             name: 'fail-case',
             nodes: [{ id: 'n', type: 'agent', agentId: a.id, input: 'hi' }],

@@ -1,4 +1,4 @@
-// [scaffold] ID: T1.1 | Date: 2026-05-18 | Description: 简化迁移引擎——顺序执行 migrations/*.sql，落表 schema_migrations
+// [refactor] ID: V1.5-A.1-S7 | Date: 2026-05-19 | Description: 迁移引擎——真异步实现（无 wrapRawDatabase 透传）；入参必须是 Driver
 'use strict';
 
 const fs = require('fs');
@@ -7,66 +7,77 @@ const path = require('path');
 const { getDb } = require('./connection');
 const { logger } = require('../../observability/logger');
 
-const MIGRATIONS_DIR = path.resolve(__dirname, 'migrations');
+const SCHEMA_MIGRATIONS_DDL = `CREATE TABLE IF NOT EXISTS schema_migrations (
+    id TEXT PRIMARY KEY,
+    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`;
 
-function ensureSchemaTable(db) {
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS schema_migrations (
-            id TEXT PRIMARY KEY,
-            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )
-    `);
+function assertDriver(driver) {
+    if (!driver || typeof driver.query !== 'function' || typeof driver.run !== 'function') {
+        throw new Error('migrate: 入参 driver 必须实现 Driver 接口（query/run/exec/transaction）');
+    }
 }
 
-function listMigrationFiles() {
-    if (!fs.existsSync(MIGRATIONS_DIR)) {
+async function ensureSchemaTable(driver) {
+    await driver.exec(SCHEMA_MIGRATIONS_DDL);
+}
+
+function listMigrationFiles(dir) {
+    if (!fs.existsSync(dir)) {
         return [];
     }
     return fs
-        .readdirSync(MIGRATIONS_DIR)
+        .readdirSync(dir)
         .filter((f) => f.endsWith('.sql'))
         .sort();
 }
 
-function getAppliedIds(db) {
-    return new Set(
-        db
-            .prepare('SELECT id FROM schema_migrations')
-            .all()
-            .map((r) => r.id),
-    );
+async function getAppliedIds(driver) {
+    const { rows } = await driver.query('SELECT id FROM schema_migrations');
+    return new Set(rows.map((r) => r.id));
 }
 
-function applyMigration(db, file) {
-    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
-    const tx = db.transaction(() => {
-        db.exec(sql);
-        db.prepare('INSERT INTO schema_migrations (id) VALUES (?)').run(file);
+async function applyMigration(driver, dir, file) {
+    const sql = fs.readFileSync(path.join(dir, file), 'utf8');
+    await driver.transaction(async (trx) => {
+        await trx.exec(sql);
+        await trx.run('INSERT INTO schema_migrations (id) VALUES (?)', [file]);
     });
-    tx();
 }
 
-function migrate(options = {}) {
-    const db = options.db || getDb();
-    ensureSchemaTable(db);
-    const applied = getAppliedIds(db);
-    const files = listMigrationFiles();
+async function migrate(options = {}) {
+    // 兼容旧字段名 `db`（但其值必须是 Driver，不再接受裸 better-sqlite3）
+    const driver = options.driver || options.db || getDb();
+    assertDriver(driver);
+    await ensureSchemaTable(driver);
+    const applied = await getAppliedIds(driver);
+    const dir = options.migrationsDir || driver.migrationsDir;
+    const files = listMigrationFiles(dir);
     const pending = files.filter((f) => !applied.has(f));
 
     for (const file of pending) {
         logger.info({ file }, 'applying migration');
-        applyMigration(db, file);
+        // eslint-disable-next-line no-await-in-loop
+        await applyMigration(driver, dir, file);
     }
     return { applied: pending };
 }
 
-if (require.main === module) {
+async function runCli() {
     require('dotenv').config();
-    const result = migrate();
+    const result = await migrate();
     /* eslint-disable no-console */
-    console.log(`migrations applied: ${result.applied.length}`);
-    result.applied.forEach((f) => console.log(`  + ${f}`));
+    console.warn(`migrations applied: ${result.applied.length}`);
+    result.applied.forEach((f) => console.warn(`  + ${f}`));
     /* eslint-enable no-console */
 }
 
-module.exports = { migrate, listMigrationFiles, MIGRATIONS_DIR };
+if (require.main === module) {
+    runCli().catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('migration failed:', err);
+        process.exit(1);
+    });
+}
+
+module.exports = { migrate, listMigrationFiles };

@@ -15,14 +15,14 @@ function createIoorRecorder(deps) {
         throw new Error('createIoorRecorder 需要 ioorRepository');
     }
 
-    function record(rawInput) {
+    async function record(rawInput) {
         const sanitized = applyRedaction(rawInput);
         const parsed = IoorWriteInputSchema.safeParse(sanitized);
         if (!parsed.success) {
             return fallbackToAudit(rawInput, parsed.error, deps);
         }
         try {
-            return deps.ioorRepository.insert(parsed.data);
+            return await deps.ioorRepository.insert(parsed.data);
         } catch (err) {
             logger.error({ err: err.message }, 'ioor insert failed, falling back to audit');
             return fallbackToAudit(rawInput, err, deps);

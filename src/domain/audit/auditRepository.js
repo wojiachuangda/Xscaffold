@@ -1,30 +1,9 @@
-// [scaffold] ID: T5.3 | Date: 2026-05-18 | Description: 审计降级通道——契约校验失败仍强写原始 payload（AA-SEAC §4.3）
+// [refactor] ID: V1.5-A.1-S4 | Date: 2026-05-19 | Description: 审计降级通道——契约校验失败仍强写原始 payload（async 契约；AA-SEAC §4.3）
 'use strict';
 
 const crypto = require('crypto');
 
 const { getDb } = require('../../infrastructure/database/connection');
-
-function buildAuditRepository(db) {
-    const conn = db || getDb();
-
-    function recordDeadLetter({ source, reason, payload }) {
-        const id = `audit_${crypto.randomBytes(8).toString('hex')}`;
-        conn.prepare(
-            `INSERT INTO audit_dead_letters (id, source, reason, payload)
-             VALUES (?, ?, ?, ?)`,
-        ).run(id, source, reason, safeStringify(payload));
-        return { id };
-    }
-
-    function listRecent(source, limit = 50) {
-        return conn
-            .prepare('SELECT * FROM audit_dead_letters WHERE source = ? ORDER BY created_at DESC LIMIT ?')
-            .all(source, limit);
-    }
-
-    return { recordDeadLetter, listRecent };
-}
 
 function safeStringify(payload) {
     try {
@@ -32,6 +11,30 @@ function safeStringify(payload) {
     } catch {
         return String(payload);
     }
+}
+
+function buildAuditRepository(driverOrUndefined) {
+    const driver = driverOrUndefined || getDb();
+
+    async function recordDeadLetter({ source, reason, payload }) {
+        const id = `audit_${crypto.randomBytes(8).toString('hex')}`;
+        await driver.run(
+            `INSERT INTO audit_dead_letters (id, source, reason, payload)
+             VALUES (?, ?, ?, ?)`,
+            [id, source, reason, safeStringify(payload)],
+        );
+        return { id };
+    }
+
+    async function listRecent(source, limit = 50) {
+        const { rows } = await driver.query(
+            'SELECT * FROM audit_dead_letters WHERE source = ? ORDER BY created_at DESC LIMIT ?',
+            [source, limit],
+        );
+        return rows;
+    }
+
+    return { recordDeadLetter, listRecent };
 }
 
 module.exports = { buildAuditRepository };

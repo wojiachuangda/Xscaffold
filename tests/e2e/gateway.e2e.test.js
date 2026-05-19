@@ -1,8 +1,8 @@
 // [test] ID: T4.6 | Date: 2026-05-18 | Description: 接入层端到端：JWT + 限流 + 工作流触发/查询 + Webhook 全链路
 'use strict';
 
-const Database = require('better-sqlite3');
 const request = require('supertest');
+const { createSqliteDriver } = require('../../src/infrastructure/database/drivers/sqliteDriver');
 
 const { createApp } = require('../../src/apiGateway/server');
 const { migrate } = require('../../src/infrastructure/database/migrate');
@@ -23,15 +23,15 @@ const DEMO_WORKFLOW = {
     edges: [],
 };
 
-function bootApp(overrides = {}) {
-    const db = new Database(':memory:');
-    migrate({ db });
+async function bootApp(overrides = {}) {
+    const driver = createSqliteDriver({ filename: ':memory:' });
+    await migrate({ driver });
     const workflowRegistry = createWorkflowRegistry();
     workflowRegistry.register('demo-add', DEMO_WORKFLOW);
-    const executionStore = buildExecutionStore(db);
+    const executionStore = buildExecutionStore(driver);
     const queue = createInMemoryAdapter();
     const app = createApp({
-        db,
+        db: driver,
         jwtSecret: JWT_SECRET,
         rateLimitBypass: true,
         workflowRegistry,
@@ -40,20 +40,31 @@ function bootApp(overrides = {}) {
         webhookProviders: { github: { secret: WEBHOOK_SECRET, workflowId: 'demo-add' } },
         ...overrides,
     });
-    return { app, db, queue, executionStore };
+    return { app, driver, queue, executionStore };
 }
 
 function waitForFinal(store, executionId, timeout = 1000) {
     return new Promise((resolve, reject) => {
         const start = Date.now();
-        const tick = setInterval(() => {
-            const e = store.findById(executionId);
-            if (e && ['SUCCESS', 'FAILED', 'STUCK', 'TIMEOUT'].includes(e.status)) {
-                clearInterval(tick);
-                resolve(e);
-            } else if (Date.now() - start > timeout) {
-                clearInterval(tick);
-                reject(new Error(`exec ${executionId} 未在 ${timeout}ms 内结束 (status=${e?.status})`));
+        let pending = false;
+        const tick = setInterval(async () => {
+            if (pending) {
+                return;
+            }
+            pending = true;
+            try {
+                const e = await store.findById(executionId);
+                if (e && ['SUCCESS', 'FAILED', 'STUCK', 'TIMEOUT'].includes(e.status)) {
+                    clearInterval(tick);
+                    resolve(e);
+                    return;
+                }
+                if (Date.now() - start > timeout) {
+                    clearInterval(tick);
+                    reject(new Error(`exec ${executionId} 未在 ${timeout}ms 内结束 (status=${e?.status})`));
+                }
+            } finally {
+                pending = false;
             }
         }, 5);
     });
@@ -62,13 +73,13 @@ function waitForFinal(store, executionId, timeout = 1000) {
 describe('接入层 E2E', () => {
     let ctx;
     let token;
-    beforeEach(() => {
-        ctx = bootApp();
+    beforeEach(async () => {
+        ctx = await bootApp();
         token = signTestToken({ sub: 'u1', role: 'admin' }, JWT_SECRET);
     });
     afterEach(() => {
         ctx.queue.close();
-        ctx.db.close();
+        ctx.driver.close();
     });
 
     test('未鉴权访问 /workflows → 401', async () => {
@@ -144,11 +155,11 @@ describe('接入层 E2E', () => {
     });
 
     test('限流：max=2 → 第 3 次 429', async () => {
-        const limited = bootApp({ rateLimitBypass: false, rateLimiter: undefined });
+        const limited = await bootApp({ rateLimitBypass: false, rateLimiter: undefined });
         // 重建 app，传入自定义限流器
         const { createRateLimiter } = require('../../src/apiGateway/middlewares/rateLimiter');
         const customApp = createApp({
-            db: limited.db,
+            db: limited.driver,
             jwtSecret: JWT_SECRET,
             rateLimiter: createRateLimiter({ max: 2, windowMs: 60000 }),
             workflowRegistry: limited.queue && createWorkflowRegistry(),
@@ -161,6 +172,6 @@ describe('接入层 E2E', () => {
         expect(r2.status).toBe(200);
         expect(r3.status).toBe(200);
         limited.queue.close();
-        limited.db.close();
+        await limited.driver.close();
     });
 });

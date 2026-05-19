@@ -40,7 +40,7 @@ function createRegistry() {
         const tool = getTool(name);
         const parsed = parseParams(tool, params);
         const timeoutMs = tool.timeoutMs || DEFAULT_TIMEOUT_MS;
-        return withTimeout(tool.handler(parsed, context), timeoutMs, name);
+        return await withTimeout(tool.handler(parsed, context), timeoutMs, name);
     }
 
     return { register, unregister, getTool, listTools, executeTool };

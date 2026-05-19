@@ -1,4 +1,4 @@
-// [scaffold] ID: T5.1 | Date: 2026-05-18 | Description: 记忆业务层（封装窗口截断与 Zod 校验）
+// [refactor] ID: V1.5-A.1-S5 | Date: 2026-05-19 | Description: 记忆业务层（async；窗口截断 + Zod 校验）
 'use strict';
 
 const { SaveMessageInputSchema, HistoryFilterSchema } = require('./memorySchema');
@@ -20,21 +20,21 @@ function buildMemoryStore(repository, options = {}) {
     }
     const defaultWindow = options.defaultWindow ?? DEFAULT_WINDOW;
 
-    function saveMessage(input) {
+    async function saveMessage(input) {
         const parsed = parseOrThrow(SaveMessageInputSchema, input);
-        return repository.insert(parsed);
+        return await repository.insert(parsed);
     }
 
-    function getHistory({ sessionId, limit } = {}) {
+    async function getHistory({ sessionId, limit } = {}) {
         const parsed = parseOrThrow(HistoryFilterSchema, {
             sessionId,
             limit: limit ?? defaultWindow,
         });
-        return repository.listRecent(parsed.sessionId, parsed.limit);
+        return await repository.listRecent(parsed.sessionId, parsed.limit);
     }
 
-    function clearSession(sessionId) {
-        return repository.deleteSession(sessionId);
+    async function clearSession(sessionId) {
+        return await repository.deleteSession(sessionId);
     }
 
     return { saveMessage, getHistory, clearSession };

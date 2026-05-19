@@ -1,4 +1,4 @@
-// [test] ID: T1.4 | Date: 2026-05-18 | Description: agentService 单元测试（mock repository）
+// [test] ID: T1.4 | Date: 2026-05-19 | Description: agentService 单元测试（A.1 async；mock repository）
 'use strict';
 
 const { buildService } = require('../../src/agentManager/agentService');
@@ -22,28 +22,28 @@ describe('buildService', () => {
 });
 
 describe('createAgent', () => {
-    test('合法入参 → 调用 repo.create', () => {
+    test('合法入参 → 调用 repo.create', async () => {
         const repo = mockRepo();
         const created = { id: 'a1', name: 'a', model: 'm', tools: [], status: 'enabled' };
-        repo.create.mockReturnValue(created);
+        repo.create.mockResolvedValue(created);
         const svc = buildService(repo);
-        const r = svc.createAgent({ name: 'a', model: 'm' });
+        const r = await svc.createAgent({ name: 'a', model: 'm' });
         expect(r).toBe(created);
         expect(repo.create).toHaveBeenCalledTimes(1);
     });
 
-    test('非法入参 → ValidationError，不调用 repo', () => {
+    test('非法入参 → ValidationError，不调用 repo', async () => {
         const repo = mockRepo();
         const svc = buildService(repo);
-        expect(() => svc.createAgent({ model: 'm' })).toThrow(ValidationError);
+        await expect(svc.createAgent({ model: 'm' })).rejects.toThrow(ValidationError);
         expect(repo.create).not.toHaveBeenCalled();
     });
 
-    test('ValidationError 携带 details 数组', () => {
+    test('ValidationError 携带 details 数组', async () => {
         const repo = mockRepo();
         const svc = buildService(repo);
         try {
-            svc.createAgent({ model: 'm' });
+            await svc.createAgent({ model: 'm' });
         } catch (e) {
             expect(e.details).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'name' })]));
         }
@@ -51,53 +51,54 @@ describe('createAgent', () => {
 });
 
 describe('updateAgent', () => {
-    test('空 patch → ValidationError', () => {
+    test('空 patch → ValidationError', async () => {
         const repo = mockRepo();
         const svc = buildService(repo);
-        expect(() => svc.updateAgent('id', {})).toThrow(ValidationError);
+        await expect(svc.updateAgent('id', {})).rejects.toThrow(ValidationError);
     });
 
-    test('合法 patch → 调用 repo.update', () => {
+    test('合法 patch → 调用 repo.update', async () => {
         const repo = mockRepo();
-        repo.update.mockReturnValue({ id: 'a', status: 'disabled' });
+        repo.update.mockResolvedValue({ id: 'a', status: 'disabled' });
         const svc = buildService(repo);
-        svc.updateAgent('a', { status: 'disabled' });
+        await svc.updateAgent('a', { status: 'disabled' });
         expect(repo.update).toHaveBeenCalledWith('a', { status: 'disabled' });
     });
 });
 
 describe('deleteAgent', () => {
-    test('调用 repo.remove 并返回 id', () => {
+    test('调用 repo.remove 并返回 id', async () => {
         const repo = mockRepo();
+        repo.remove.mockResolvedValue(true);
         const svc = buildService(repo);
-        expect(svc.deleteAgent('x')).toEqual({ id: 'x' });
+        expect(await svc.deleteAgent('x')).toEqual({ id: 'x' });
         expect(repo.remove).toHaveBeenCalledWith('x');
     });
 });
 
 describe('getAgentById', () => {
-    test('找到 → 返回实体', () => {
+    test('找到 → 返回实体', async () => {
         const repo = mockRepo();
         const e = { id: 'a', name: 'n' };
-        repo.findById.mockReturnValue(e);
+        repo.findById.mockResolvedValue(e);
         const svc = buildService(repo);
-        expect(svc.getAgentById('a')).toBe(e);
+        expect(await svc.getAgentById('a')).toBe(e);
     });
 
-    test('未找到 → NotFoundError', () => {
+    test('未找到 → NotFoundError', async () => {
         const repo = mockRepo();
-        repo.findById.mockReturnValue(null);
+        repo.findById.mockResolvedValue(null);
         const svc = buildService(repo);
-        expect(() => svc.getAgentById('x')).toThrow(NotFoundError);
+        await expect(svc.getAgentById('x')).rejects.toThrow(NotFoundError);
     });
 });
 
 describe('listAgents', () => {
-    test('过滤参数被 Zod 校验后透传', () => {
+    test('过滤参数被 Zod 校验后透传', async () => {
         const repo = mockRepo();
-        repo.findAll.mockReturnValue({ items: [], total: 0 });
+        repo.findAll.mockResolvedValue({ items: [], total: 0 });
         const svc = buildService(repo);
-        svc.listAgents({ status: 'enabled', limit: '20' });
+        await svc.listAgents({ status: 'enabled', limit: '20' });
         expect(repo.findAll).toHaveBeenCalledWith({
             status: 'enabled',
             limit: 20,
@@ -105,9 +106,9 @@ describe('listAgents', () => {
         });
     });
 
-    test('非法 limit → ValidationError', () => {
+    test('非法 limit → ValidationError', async () => {
         const repo = mockRepo();
         const svc = buildService(repo);
-        expect(() => svc.listAgents({ limit: -1 })).toThrow(ValidationError);
+        await expect(svc.listAgents({ limit: -1 })).rejects.toThrow(ValidationError);
     });
 });

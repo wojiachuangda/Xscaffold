@@ -1,8 +1,8 @@
 // [test] ID: T5.5 | Date: 2026-05-18 | Description: 可观测性端到端（trace 查询 + /metrics）
 'use strict';
 
-const Database = require('better-sqlite3');
 const request = require('supertest');
+const { createSqliteDriver } = require('../../src/infrastructure/database/drivers/sqliteDriver');
 
 const { createApp } = require('../../src/apiGateway/server');
 const { migrate } = require('../../src/infrastructure/database/migrate');
@@ -18,19 +18,19 @@ const TOOL_WORKFLOW = {
     edges: [],
 };
 
-function bootApp(overrides = {}) {
-    const db = new Database(':memory:');
-    migrate({ db });
+async function bootApp(overrides = {}) {
+    const driver = createSqliteDriver({ filename: ':memory:' });
+    await migrate({ driver });
     const registry = createWorkflowRegistry();
     registry.register('tool-only', TOOL_WORKFLOW);
     const app = createApp({
-        db,
+        db: driver,
         jwtSecret: JWT_SECRET,
         rateLimitBypass: true,
         workflowRegistry: registry,
         ...overrides,
     });
-    return { app, db };
+    return { app, driver };
 }
 
 function waitForFinal(app, token, executionId, timeout = 1000) {
@@ -54,11 +54,11 @@ function waitForFinal(app, token, executionId, timeout = 1000) {
 describe('可观测性 E2E', () => {
     let ctx;
     let token;
-    beforeEach(() => {
-        ctx = bootApp();
+    beforeEach(async () => {
+        ctx = await bootApp();
         token = signTestToken({ sub: 'u1' }, JWT_SECRET);
     });
-    afterEach(() => ctx.db.close());
+    afterEach(() => ctx.driver.close());
 
     test('GET /metrics 默认豁免 JWT，返回 Prometheus 文本', async () => {
         const r = await request(ctx.app).get('/metrics');
@@ -100,11 +100,11 @@ describe('可观测性 E2E', () => {
     });
 
     test('METRICS_TOKEN 配置后 /metrics 需要正确头', async () => {
-        const guarded = bootApp({ metricsToken: 'secret-metrics' });
+        const guarded = await bootApp({ metricsToken: 'secret-metrics' });
         const denied = await request(guarded.app).get('/metrics');
         expect(denied.status).toBe(401);
         const allowed = await request(guarded.app).get('/metrics').set('x-metrics-token', 'secret-metrics');
         expect(allowed.status).toBe(200);
-        guarded.db.close();
+        await guarded.driver.close();
     });
 });

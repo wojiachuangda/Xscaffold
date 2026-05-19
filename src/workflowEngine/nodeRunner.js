@@ -28,7 +28,7 @@ function createNodeRunner(deps) {
         if (!runner) {
             throw new ValidationError(`未知节点类型: ${node.type}`);
         }
-        return runWithRetry(node, () => withTimeout(runner(node, ctx), nodeTimeoutMs(node), node.id));
+        return await runWithRetry(node, () => withTimeout(runner(node, ctx), nodeTimeoutMs(node), node.id));
     }
 
     return { runNode, StuckError };
@@ -77,33 +77,33 @@ async function runAgentNode(node, ctx, deps) {
     if (!agentService || !llmClient) {
         throw new AppError('runAgentNode 缺少依赖: agentService / llmClient');
     }
-    const agent = agentService.getAgentById(node.agentId);
+    const agent = await agentService.getAgentById(node.agentId);
     const userPrompt = resolveInput(node.input, ctx);
-    const baseMessages = buildLLMMessages(agent, userPrompt, ctx, deps);
+    const baseMessages = await buildLLMMessages(agent, userPrompt, ctx, deps);
     const healed = await invokeLLMWithHealing(agent, baseMessages, llmClient, ctx);
-    recordAgentTurns({ agent, baseMessages, healed, node, ctx, deps });
+    await recordAgentTurns({ agent, baseMessages, healed, node, ctx, deps });
     if (!healed.ok) {
         throw new StuckError(`Agent 自愈耗尽: ${node.id}`, { reason: healed.reason });
     }
-    persistMemory({ agent, userPrompt, healed, ctx, deps });
+    await persistMemory({ agent, userPrompt, healed, ctx, deps });
     return buildAgentOutput(agent, healed);
 }
 
-function buildLLMMessages(agent, userPrompt, ctx, deps) {
-    const history = pullHistory(ctx, deps);
+async function buildLLMMessages(agent, userPrompt, ctx, deps) {
+    const history = await pullHistory(ctx, deps);
     return [...history, { role: 'user', content: userPrompt }];
 }
 
-function pullHistory(ctx, deps) {
+async function pullHistory(ctx, deps) {
     if (!deps.memoryStore || !ctx.sessionId) {
         return [];
     }
-    const items = deps.memoryStore.getHistory({ sessionId: ctx.sessionId });
+    const items = await deps.memoryStore.getHistory({ sessionId: ctx.sessionId });
     return items.map((m) => ({ role: m.role, content: m.content }));
 }
 
 async function invokeLLMWithHealing(agent, baseMessages, llmClient, ctx) {
-    return runWithSelfHealing({
+    return await runWithSelfHealing({
         callLLM: async (extra) => {
             assertBeforeCall(ctx);
             const messages = extra ? [...baseMessages, { role: 'system', content: extra }] : baseMessages;
@@ -114,12 +114,12 @@ async function invokeLLMWithHealing(agent, baseMessages, llmClient, ctx) {
     });
 }
 
-function recordAgentTurns({ agent, baseMessages, healed, node, ctx, deps }) {
+async function recordAgentTurns({ agent, baseMessages, healed, node, ctx, deps }) {
     if (!deps.ioorRecorder || !ctx.executionId) {
         return;
     }
     const turnIndex = bumpTurnCounter(ctx);
-    deps.ioorRecorder.record({
+    await deps.ioorRecorder.record({
         executionId: ctx.executionId,
         nodeId: node.id,
         turnIndex,
@@ -147,17 +147,17 @@ function bumpTurnCounter(ctx) {
     return next;
 }
 
-function persistMemory({ agent, userPrompt, healed, ctx, deps }) {
+async function persistMemory({ agent, userPrompt, healed, ctx, deps }) {
     if (!deps.memoryStore || !ctx.sessionId || !healed.ok) {
         return;
     }
-    deps.memoryStore.saveMessage({
+    await deps.memoryStore.saveMessage({
         sessionId: ctx.sessionId,
         role: 'user',
         content: userPrompt,
         metadata: { agentId: agent.id },
     });
-    deps.memoryStore.saveMessage({
+    await deps.memoryStore.saveMessage({
         sessionId: ctx.sessionId,
         role: 'assistant',
         content: healed.result.content,
@@ -181,14 +181,17 @@ async function runToolNode(node, ctx, { toolRegistry }) {
         throw new AppError('runToolNode 缺少依赖: toolRegistry');
     }
     const params = renderParams(node.params || {}, ctx);
-    return toolRegistry.executeTool(node.toolName, params, ctx);
+    return await toolRegistry.executeTool(node.toolName, params, ctx);
 }
 
+// runConditionNode/runCodeNode 体内无 I/O；async 仅为契合 Promise<output> 接口
+// eslint-disable-next-line require-await
 async function runConditionNode(node, ctx) {
     const result = evaluateBoolean(node.expression, ctx);
     return { branch: result ? 'true' : 'false', value: result };
 }
 
+// eslint-disable-next-line require-await
 async function runCodeNode(node, ctx) {
     const rendered = renderTemplate(node.code, ctx);
     return { output: rendered };

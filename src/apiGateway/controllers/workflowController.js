@@ -1,4 +1,4 @@
-// [scaffold] ID: T4.3 | Date: 2026-05-18 | Description: 工作流路由控制器（POST execute 202 异步 + GET status）
+// [refactor] ID: V1.5-A.1-S6 | Date: 2026-05-19 | Description: 工作流路由控制器（async store；POST execute 202 异步 + GET status）
 'use strict';
 
 const express = require('express');
@@ -25,7 +25,7 @@ function buildWorkflowRouter(deps) {
 
     router.get(
         '/',
-        asyncHandler(async (req, res) => {
+        asyncHandler((req, res) => {
             res.json(success(deps.workflowRegistry.list()));
         }),
     );
@@ -33,14 +33,14 @@ function buildWorkflowRouter(deps) {
     router.post(
         '/:id/execute',
         validate({ params: WorkflowIdParamSchema, body: ExecuteRequestSchema }),
-        asyncHandler(async (req, res) => triggerExecute(req, res, deps)),
+        asyncHandler((req, res) => triggerExecute(req, res, deps)),
     );
 
     router.get(
         '/executions/:id',
         validate({ params: ExecutionIdParamSchema }),
         asyncHandler(async (req, res) => {
-            res.json(success(deps.executionStore.requireById(req.params.id)));
+            res.json(success(await deps.executionStore.requireById(req.params.id)));
         }),
     );
 
@@ -48,19 +48,19 @@ function buildWorkflowRouter(deps) {
 }
 
 function registerWorker(deps) {
-    deps.queue.process(WORKFLOW_QUEUE, async (payload) => runOne(payload, deps));
+    deps.queue.process(WORKFLOW_QUEUE, (payload) => runOne(payload, deps));
 }
 
 async function runOne(payload, deps) {
     const { workflowId, executionId, input, sessionId } = payload;
-    deps.executionStore.markRunning(executionId);
+    await deps.executionStore.markRunning(executionId);
     const def = deps.workflowRegistry.get(workflowId);
     const ctx = { ...(input || {}), executionId };
     if (sessionId) {
         ctx.sessionId = sessionId;
     }
     const result = await deps.executor.execute(def, ctx);
-    deps.executionStore.markFinal(executionId, {
+    await deps.executionStore.markFinal(executionId, {
         status: result.status,
         result: result.status === 'SUCCESS' ? result.context : null,
         error: result.error,
@@ -79,7 +79,7 @@ function recordWorkflowMetrics(metricsExporter, workflowName, result) {
 
 async function triggerExecute(req, res, deps) {
     const def = deps.workflowRegistry.get(req.params.id);
-    const execution = deps.executionStore.create({ workflowId: req.params.id, input: req.body.input || null });
+    const execution = await deps.executionStore.create({ workflowId: req.params.id, input: req.body.input || null });
     deps.queue.enqueue(WORKFLOW_QUEUE, {
         workflowId: req.params.id,
         executionId: execution.id,

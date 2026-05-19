@@ -1,12 +1,10 @@
-// [scaffold] ID: T1.3 | Date: 2026-05-18 | Description: Agent 数据访问层（AA-SEAC §3 约束 4：SQL 仅出现在此文件）
+// [refactor] ID: V1.5-A.1-S4 | Date: 2026-05-19 | Description: Agent 数据访问层（async 契约；SQL 仅出现在此文件；AA-SEAC §3 约束 4）
 'use strict';
 
 const crypto = require('crypto');
 
 const { getDb } = require('../infrastructure/database/connection');
 const { ConflictError, NotFoundError } = require('../infrastructure/errors/AppError');
-
-const UNIQUE_VIOLATION = 'SQLITE_CONSTRAINT_UNIQUE';
 
 function rowToEntity(row) {
     if (!row) {
@@ -32,12 +30,14 @@ function generateId() {
     return `agent_${crypto.randomBytes(8).toString('hex')}`;
 }
 
-function findById(conn, id) {
-    return rowToEntity(conn.prepare('SELECT * FROM agents WHERE id = ?').get(id));
+async function findById(driver, id) {
+    const { rows } = await driver.query('SELECT * FROM agents WHERE id = ?', [id]);
+    return rowToEntity(rows[0]);
 }
 
-function findByName(conn, name) {
-    return rowToEntity(conn.prepare('SELECT * FROM agents WHERE name = ?').get(name));
+async function findByName(driver, name) {
+    const { rows } = await driver.query('SELECT * FROM agents WHERE name = ?', [name]);
+    return rowToEntity(rows[0]);
 }
 
 function buildWhere(filter) {
@@ -54,88 +54,94 @@ function buildWhere(filter) {
     return { whereSql: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
 }
 
-function findAll(conn, filter = {}) {
+async function findAll(driver, filter = {}) {
     const { whereSql, params } = buildWhere(filter);
     const limit = filter.limit ?? 50;
     const offset = filter.offset ?? 0;
-    const rows = conn
-        .prepare(`SELECT * FROM agents ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
-        .all(...params, limit, offset);
-    const total = conn.prepare(`SELECT COUNT(*) AS c FROM agents ${whereSql}`).get(...params).c;
-    return { items: rows.map(rowToEntity), total };
+    const rowsResult = await driver.query(
+        `SELECT * FROM agents ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+        [...params, limit, offset],
+    );
+    const countResult = await driver.query(`SELECT COUNT(*) AS c FROM agents ${whereSql}`, params);
+    return {
+        items: rowsResult.rows.map(rowToEntity),
+        total: countResult.rows[0].c,
+    };
 }
 
-function insertAgent(conn, id, input, ts) {
-    conn.prepare(
+async function insertAgent(driver, id, input, ts) {
+    await driver.run(
         `INSERT INTO agents (id, name, description, model, tools, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-        id,
-        input.name,
-        input.description ?? null,
-        input.model,
-        JSON.stringify(input.tools ?? []),
-        input.status ?? 'enabled',
-        ts,
-        ts,
+        [
+            id,
+            input.name,
+            input.description ?? null,
+            input.model,
+            JSON.stringify(input.tools ?? []),
+            input.status ?? 'enabled',
+            ts,
+            ts,
+        ],
     );
 }
 
-function create(conn, input) {
+async function create(driver, input) {
     const id = generateId();
     const ts = nowIso();
     try {
-        insertAgent(conn, id, input, ts);
+        await insertAgent(driver, id, input, ts);
     } catch (err) {
-        if (err.code === UNIQUE_VIOLATION) {
+        if (driver.isUniqueViolation(err)) {
             throw new ConflictError(`Agent 名称已存在: ${input.name}`);
         }
         throw err;
     }
-    return findById(conn, id);
+    return findById(driver, id);
 }
 
-function updateAgentRow(conn, id, next) {
-    conn.prepare(
+async function updateAgentRow(driver, id, next) {
+    await driver.run(
         `UPDATE agents SET name = ?, description = ?, model = ?, tools = ?, status = ?, updated_at = ?
          WHERE id = ?`,
-    ).run(next.name, next.description ?? null, next.model, JSON.stringify(next.tools ?? []), next.status, nowIso(), id);
+        [next.name, next.description ?? null, next.model, JSON.stringify(next.tools ?? []), next.status, nowIso(), id],
+    );
 }
 
-function update(conn, id, patch) {
-    const existing = findById(conn, id);
+async function update(driver, id, patch) {
+    const existing = await findById(driver, id);
     if (!existing) {
         throw new NotFoundError(`Agent 不存在: ${id}`);
     }
     const next = { ...existing, ...patch };
     try {
-        updateAgentRow(conn, id, next);
+        await updateAgentRow(driver, id, next);
     } catch (err) {
-        if (err.code === UNIQUE_VIOLATION) {
+        if (driver.isUniqueViolation(err)) {
             throw new ConflictError(`Agent 名称已存在: ${next.name}`);
         }
         throw err;
     }
-    return findById(conn, id);
+    return findById(driver, id);
 }
 
-function remove(conn, id) {
-    const r = conn.prepare('DELETE FROM agents WHERE id = ?').run(id);
+async function remove(driver, id) {
+    const r = await driver.run('DELETE FROM agents WHERE id = ?', [id]);
     if (r.changes === 0) {
         throw new NotFoundError(`Agent 不存在: ${id}`);
     }
     return true;
 }
 
-function buildRepository(db) {
-    const conn = db || getDb();
+function buildRepository(driverOrUndefined) {
+    const driver = driverOrUndefined || getDb();
     return {
-        findById: (id) => findById(conn, id),
-        findByName: (name) => findByName(conn, name),
-        findAll: (filter) => findAll(conn, filter),
-        create: (input) => create(conn, input),
-        update: (id, patch) => update(conn, id, patch),
-        remove: (id) => remove(conn, id),
+        findById: (id) => findById(driver, id),
+        findByName: (name) => findByName(driver, name),
+        findAll: (filter) => findAll(driver, filter),
+        create: (input) => create(driver, input),
+        update: (id, patch) => update(driver, id, patch),
+        remove: (id) => remove(driver, id),
     };
 }
 

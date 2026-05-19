@@ -1,4 +1,4 @@
-// [scaffold] ID: T1.6+T4.x+T5.x | Date: 2026-05-18 | Description: Express 应用工厂——装配中间件、路由、错误处理、可观测性
+// [refactor] ID: V1.5-A.1-S6 | Date: 2026-05-19 | Description: Express 应用工厂——装配中间件、路由、错误处理、可观测性（async store/repo）
 'use strict';
 
 const express = require('express');
@@ -84,6 +84,8 @@ function buildToolRegistry() {
 
 function stubLLMClient() {
     return {
+        // stub：仅契合 LLMClient 接口的 async 签名；生产实现见 openaiClient.js
+        // eslint-disable-next-line require-await
         chat: async () => ({
             content: '',
             reasoning_content: null,
@@ -95,7 +97,9 @@ function stubLLMClient() {
 
 function mountHealthAndWebhooks(app, deps, overrides) {
     app.get('/healthz', (req, res) => res.json(success({ status: 'ok', uptime: process.uptime() })));
-    app.get('/readyz', (req, res) => handleReadyz(req, res, deps));
+    app.get('/readyz', (req, res, next) => {
+        handleReadyz(req, res, deps).catch(next);
+    });
     if (overrides.webhookProviders) {
         app.use(
             '/webhooks',
@@ -109,10 +113,10 @@ function mountHealthAndWebhooks(app, deps, overrides) {
     }
 }
 
-function handleReadyz(req, res, deps) {
+async function handleReadyz(req, res, deps) {
     const checks = { db: false, queue: false };
     try {
-        deps.executionStore.findById('exec_readyz_probe');
+        await deps.executionStore.findById('exec_readyz_probe');
         checks.db = true;
     } catch {
         checks.db = false;

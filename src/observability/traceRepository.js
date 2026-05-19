@@ -1,4 +1,4 @@
-// [scaffold] ID: T5.4 | Date: 2026-05-18 | Description: node_traces 表 Repository
+// [refactor] ID: V1.5-A.1-S4 | Date: 2026-05-19 | Description: node_traces 表 Repository（async 契约）
 'use strict';
 
 const crypto = require('crypto');
@@ -28,51 +28,54 @@ function rowToEntity(row) {
     };
 }
 
-function insertStart(conn, { executionId, nodeId, nodeType, attempt }) {
+async function findById(driver, id) {
+    const { rows } = await driver.query('SELECT * FROM node_traces WHERE id = ?', [id]);
+    return rowToEntity(rows[0]);
+}
+
+async function insertStart(driver, { executionId, nodeId, nodeType, attempt }) {
     const id = generateId();
     const startedAt = new Date().toISOString();
-    conn.prepare(
+    await driver.run(
         `INSERT INTO node_traces (id, execution_id, node_id, node_type, status, started_at, attempt)
          VALUES (?, ?, ?, ?, 'RUNNING', ?, ?)`,
-    ).run(id, executionId, nodeId, nodeType, startedAt, attempt || 1);
+        [id, executionId, nodeId, nodeType, startedAt, attempt || 1],
+    );
     return id;
 }
 
-function finish(conn, id, { status, output, error, durationMs }) {
+async function finish(driver, id, { status, output, error, durationMs }) {
     const finishedAt = new Date().toISOString();
-    conn.prepare(
+    await driver.run(
         `UPDATE node_traces
          SET status = ?, output = ?, error = ?, finished_at = ?, duration_ms = ?
          WHERE id = ?`,
-    ).run(
-        status,
-        output ? JSON.stringify(output) : null,
-        error ? JSON.stringify(error) : null,
-        finishedAt,
-        durationMs ?? null,
-        id,
+        [
+            status,
+            output ? JSON.stringify(output) : null,
+            error ? JSON.stringify(error) : null,
+            finishedAt,
+            durationMs ?? null,
+            id,
+        ],
     );
-    return findById(conn, id);
+    return findById(driver, id);
 }
 
-function findById(conn, id) {
-    return rowToEntity(conn.prepare('SELECT * FROM node_traces WHERE id = ?').get(id));
+async function listByExecution(driver, executionId) {
+    const { rows } = await driver.query('SELECT * FROM node_traces WHERE execution_id = ? ORDER BY started_at ASC', [
+        executionId,
+    ]);
+    return rows.map(rowToEntity);
 }
 
-function listByExecution(conn, executionId) {
-    return conn
-        .prepare('SELECT * FROM node_traces WHERE execution_id = ? ORDER BY started_at ASC')
-        .all(executionId)
-        .map(rowToEntity);
-}
-
-function buildTraceRepository(db) {
-    const conn = db || getDb();
+function buildTraceRepository(driverOrUndefined) {
+    const driver = driverOrUndefined || getDb();
     return {
-        insertStart: (input) => insertStart(conn, input),
-        finish: (id, patch) => finish(conn, id, patch),
-        findById: (id) => findById(conn, id),
-        listByExecution: (executionId) => listByExecution(conn, executionId),
+        insertStart: (input) => insertStart(driver, input),
+        finish: (id, patch) => finish(driver, id, patch),
+        findById: (id) => findById(driver, id),
+        listByExecution: (executionId) => listByExecution(driver, executionId),
     };
 }
 

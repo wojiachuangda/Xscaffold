@@ -1,4 +1,4 @@
-// [scaffold] ID: T5.3 | Date: 2026-05-18 | Description: IOOR 记录存储（SQL 仅在此文件）
+// [refactor] ID: V1.5-A.1-S4 | Date: 2026-05-19 | Description: IOOR 记录存储（async 契约；SQL 仅在此文件）
 'use strict';
 
 const crypto = require('crypto');
@@ -32,50 +32,53 @@ function rowToEntity(row) {
     };
 }
 
-function insertRecord(conn, record) {
+async function findById(driver, id) {
+    const { rows } = await driver.query('SELECT * FROM ioor_records WHERE id = ?', [id]);
+    return rowToEntity(rows[0]);
+}
+
+async function insertRecord(driver, record) {
     const id = generateId();
-    conn.prepare(
+    await driver.run(
         `INSERT INTO ioor_records
          (id, execution_id, node_id, turn_index, agent_id, profile_hash,
           model_provider, model_name, input, output, tool_calls, observations,
           token_usage, latency_ms)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-        id,
-        record.executionId,
-        record.nodeId,
-        record.turnIndex,
-        record.agentId ?? null,
-        record.profileHash ?? null,
-        record.modelProvider ?? null,
-        record.modelName ?? null,
-        record.input ? JSON.stringify(record.input) : null,
-        record.output ? JSON.stringify(record.output) : null,
-        JSON.stringify(record.toolCalls || []),
-        JSON.stringify(record.observations || []),
-        record.tokenUsage ? JSON.stringify(record.tokenUsage) : null,
-        record.latencyMs ?? null,
+        [
+            id,
+            record.executionId,
+            record.nodeId,
+            record.turnIndex,
+            record.agentId ?? null,
+            record.profileHash ?? null,
+            record.modelProvider ?? null,
+            record.modelName ?? null,
+            record.input ? JSON.stringify(record.input) : null,
+            record.output ? JSON.stringify(record.output) : null,
+            JSON.stringify(record.toolCalls || []),
+            JSON.stringify(record.observations || []),
+            record.tokenUsage ? JSON.stringify(record.tokenUsage) : null,
+            record.latencyMs ?? null,
+        ],
     );
-    return findById(conn, id);
+    return findById(driver, id);
 }
 
-function findById(conn, id) {
-    return rowToEntity(conn.prepare('SELECT * FROM ioor_records WHERE id = ?').get(id));
+async function listByExecution(driver, executionId) {
+    const { rows } = await driver.query(
+        'SELECT * FROM ioor_records WHERE execution_id = ? ORDER BY turn_index ASC, created_at ASC',
+        [executionId],
+    );
+    return rows.map(rowToEntity);
 }
 
-function listByExecution(conn, executionId) {
-    return conn
-        .prepare('SELECT * FROM ioor_records WHERE execution_id = ? ORDER BY turn_index ASC, created_at ASC')
-        .all(executionId)
-        .map(rowToEntity);
-}
-
-function buildIoorRepository(db) {
-    const conn = db || getDb();
+function buildIoorRepository(driverOrUndefined) {
+    const driver = driverOrUndefined || getDb();
     return {
-        insert: (record) => insertRecord(conn, record),
-        findById: (id) => findById(conn, id),
-        listByExecution: (executionId) => listByExecution(conn, executionId),
+        insert: (record) => insertRecord(driver, record),
+        findById: (id) => findById(driver, id),
+        listByExecution: (executionId) => listByExecution(driver, executionId),
     };
 }
 

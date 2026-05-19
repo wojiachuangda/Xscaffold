@@ -1,4 +1,4 @@
-// [scaffold] ID: T4.3 | Date: 2026-05-18 | Description: 工作流执行记录持久化（Repository 模式，SQL 仅出现此文件）
+// [refactor] ID: V1.5-A.1-S4 | Date: 2026-05-19 | Description: 工作流执行记录持久化（async Repository；SQL 仅出现此文件）
 'use strict';
 
 const crypto = require('crypto');
@@ -27,50 +27,53 @@ function rowToEntity(row) {
     };
 }
 
-function buildExecutionStore(db) {
-    const conn = db || getDb();
+function buildExecutionStore(driverOrUndefined) {
+    const driver = driverOrUndefined || getDb();
 
-    function create({ workflowId, input }) {
+    async function findById(id) {
+        const { rows } = await driver.query('SELECT * FROM executions WHERE id = ?', [id]);
+        return rowToEntity(rows[0]);
+    }
+
+    async function create({ workflowId, input }) {
         const id = generateId();
         const startedAt = new Date().toISOString();
-        conn.prepare(
+        await driver.run(
             `INSERT INTO executions (id, workflow_id, status, input, started_at)
              VALUES (?, ?, 'PENDING', ?, ?)`,
-        ).run(id, workflowId, input ? JSON.stringify(input) : null, startedAt);
+            [id, workflowId, input ? JSON.stringify(input) : null, startedAt],
+        );
         return findById(id);
     }
 
-    function findById(id) {
-        return rowToEntity(conn.prepare('SELECT * FROM executions WHERE id = ?').get(id));
-    }
-
-    function requireById(id) {
-        const r = findById(id);
+    async function requireById(id) {
+        const r = await findById(id);
         if (!r) {
             throw new NotFoundError(`执行记录不存在: ${id}`);
         }
         return r;
     }
 
-    function markFinal(id, { status, result, error, durationMs }) {
+    async function markFinal(id, { status, result, error, durationMs }) {
         const finishedAt = new Date().toISOString();
-        conn.prepare(
+        await driver.run(
             `UPDATE executions
              SET status = ?, result = ?, error = ?, finished_at = ?, duration_ms = ?
              WHERE id = ?`,
-        ).run(
-            status,
-            result ? JSON.stringify(result) : null,
-            error ? JSON.stringify(error) : null,
-            finishedAt,
-            durationMs ?? null,
-            id,
+            [
+                status,
+                result ? JSON.stringify(result) : null,
+                error ? JSON.stringify(error) : null,
+                finishedAt,
+                durationMs ?? null,
+                id,
+            ],
         );
         return findById(id);
     }
 
-    function markRunning(id) {
-        conn.prepare("UPDATE executions SET status = 'RUNNING' WHERE id = ?").run(id);
+    async function markRunning(id) {
+        await driver.run("UPDATE executions SET status = 'RUNNING' WHERE id = ?", [id]);
     }
 
     return { create, findById, requireById, markFinal, markRunning };

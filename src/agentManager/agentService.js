@@ -1,4 +1,4 @@
-// [scaffold] ID: T1.4 | Date: 2026-05-18 | Description: Agent 业务编排层（严禁直接调 SQL；依赖 repository 抽象）
+// [refactor] ID: V1.5-A.1-S5 | Date: 2026-05-19 | Description: Agent 业务编排层（async；严禁直接调 SQL；依赖 repository 抽象）
 'use strict';
 
 const { CreateAgentSchema, UpdateAgentSchema, ListAgentsFilterSchema } = require('./agentSchema');
@@ -12,32 +12,32 @@ function buildService(repository) {
         throw new Error('agentService 需要注入 repository');
     }
 
-    function createAgent(input) {
+    async function createAgent(input) {
         const parsed = parseOrThrow(CreateAgentSchema, input);
-        return repository.create(parsed);
+        return await repository.create(parsed);
     }
 
-    function updateAgent(id, patch) {
+    async function updateAgent(id, patch) {
         const parsed = parseOrThrow(UpdateAgentSchema, patch);
-        return repository.update(id, parsed);
+        return await repository.update(id, parsed);
     }
 
-    function deleteAgent(id) {
-        repository.remove(id);
+    async function deleteAgent(id) {
+        await repository.remove(id);
         return { id };
     }
 
-    function getAgentById(id) {
-        const agent = repository.findById(id);
+    async function getAgentById(id) {
+        const agent = await repository.findById(id);
         if (!agent) {
             throw new NotFoundError(`Agent 不存在: ${id}`);
         }
         return agent;
     }
 
-    function listAgents(filter = {}) {
+    async function listAgents(filter = {}) {
         const parsed = parseOrThrow(ListAgentsFilterSchema, filter);
-        return repository.findAll(parsed);
+        return await repository.findAll(parsed);
     }
 
     return { createAgent, updateAgent, deleteAgent, getAgentById, listAgents };

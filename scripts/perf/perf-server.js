@@ -14,6 +14,7 @@ const PORT = Number(process.env.PERF_PORT) || 4100;
 
 function mockLLM() {
     return {
+        // eslint-disable-next-line require-await
         chat: async () => ({
             content: 'mock',
             reasoning_content: null,

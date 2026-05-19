@@ -36,6 +36,9 @@ module.exports = {
         eqeqeq: ['error', 'always'],
         curly: ['error', 'all'],
         'no-var': 'error',
+        // A.1 引入：async 函数必须 await 至少一处（防止"裸 async wrapper"）；
+        // 对 sqliteDriver 内部包装 better-sqlite3 同步调用的方法用 inline disable 豁免
+        'require-await': 'error',
     },
     overrides: [
         {
@@ -43,6 +46,8 @@ module.exports = {
             rules: {
                 'max-lines-per-function': 'off',
                 'max-lines': 'off',
+                // 测试中 mock 常用 `async () => stub` 形式，require-await 噪声大且无收益
+                'require-await': 'off',
             },
         },
     ],

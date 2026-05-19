@@ -4,7 +4,7 @@
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
-const Database = require('better-sqlite3');
+const { createSqliteDriver } = require('../../src/infrastructure/database/drivers/sqliteDriver');
 
 const addNumbers = require('../../src/toolRegistry/builtinTools/addNumbers');
 const readFile = require('../../src/toolRegistry/builtinTools/readFile');
@@ -39,28 +39,31 @@ describe('readFile', () => {
 });
 
 describe('queryDatabase', () => {
-    let db;
-    beforeEach(() => {
-        db = new Database(':memory:');
-        db.exec('CREATE TABLE t(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)');
-        db.prepare('INSERT INTO t(name) VALUES (?), (?)').run('a', 'b');
+    let driver;
+    beforeEach(async () => {
+        driver = createSqliteDriver({ filename: ':memory:' });
+        await driver.exec('CREATE TABLE t(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)');
+        await driver.run('INSERT INTO t(name) VALUES (?), (?)', ['a', 'b']);
     });
-    afterEach(() => db.close());
+    afterEach(() => driver.close());
 
     test('SELECT 成功', async () => {
-        const r = await queryDatabase.handler({ sql: 'SELECT name FROM t ORDER BY id', params: [] }, { db });
+        const r = await queryDatabase.handler({ sql: 'SELECT name FROM t ORDER BY id', params: [] }, { db: driver });
         expect(r.rowCount).toBe(2);
         expect(r.rows.map((x) => x.name)).toEqual(['a', 'b']);
     });
 
     test('非 SELECT 语句被拒绝', async () => {
-        await expect(queryDatabase.handler({ sql: 'DELETE FROM t', params: [] }, { db })).rejects.toThrow(
+        await expect(queryDatabase.handler({ sql: 'DELETE FROM t', params: [] }, { db: driver })).rejects.toThrow(
             ValidationError,
         );
     });
 
     test('参数化查询', async () => {
-        const r = await queryDatabase.handler({ sql: 'SELECT name FROM t WHERE name = ?', params: ['a'] }, { db });
+        const r = await queryDatabase.handler(
+            { sql: 'SELECT name FROM t WHERE name = ?', params: ['a'] },
+            { db: driver },
+        );
         expect(r.rowCount).toBe(1);
     });
 });

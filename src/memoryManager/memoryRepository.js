@@ -1,4 +1,4 @@
-// [scaffold] ID: T5.1 | Date: 2026-05-18 | Description: messages 表 Repository（SQL 仅在此文件）
+// [refactor] ID: V1.5-A.1-S4 | Date: 2026-05-19 | Description: messages 表 Repository（async 契约；SQL 仅在此文件）
 'use strict';
 
 const crypto = require('crypto');
@@ -24,47 +24,50 @@ function generateId() {
     return `msg_${crypto.randomBytes(8).toString('hex')}`;
 }
 
-function insertMessage(conn, input) {
+async function findById(driver, id) {
+    const { rows } = await driver.query('SELECT * FROM messages WHERE id = ?', [id]);
+    return rowToEntity(rows[0]);
+}
+
+async function insertMessage(driver, input) {
     const id = generateId();
     const createdAt = new Date().toISOString();
-    conn.prepare(
+    await driver.run(
         `INSERT INTO messages (id, session_id, tenant_id, role, content, metadata, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-        id,
-        input.sessionId,
-        input.tenantId ?? null,
-        input.role,
-        input.content,
-        input.metadata ? JSON.stringify(input.metadata) : null,
-        createdAt,
+        [
+            id,
+            input.sessionId,
+            input.tenantId ?? null,
+            input.role,
+            input.content,
+            input.metadata ? JSON.stringify(input.metadata) : null,
+            createdAt,
+        ],
     );
-    return findById(conn, id);
+    return findById(driver, id);
 }
 
-function findById(conn, id) {
-    return rowToEntity(conn.prepare('SELECT * FROM messages WHERE id = ?').get(id));
-}
-
-function listRecent(conn, sessionId, limit) {
-    const rows = conn
-        .prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT ?')
-        .all(sessionId, limit);
+async function listRecent(driver, sessionId, limit) {
+    const { rows } = await driver.query(
+        'SELECT * FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT ?',
+        [sessionId, limit],
+    );
     return rows.reverse().map(rowToEntity);
 }
 
-function deleteSession(conn, sessionId) {
-    const r = conn.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
+async function deleteSession(driver, sessionId) {
+    const r = await driver.run('DELETE FROM messages WHERE session_id = ?', [sessionId]);
     return r.changes;
 }
 
-function buildMemoryRepository(db) {
-    const conn = db || getDb();
+function buildMemoryRepository(driverOrUndefined) {
+    const driver = driverOrUndefined || getDb();
     return {
-        insert: (input) => insertMessage(conn, input),
-        findById: (id) => findById(conn, id),
-        listRecent: (sessionId, limit) => listRecent(conn, sessionId, limit),
-        deleteSession: (sessionId) => deleteSession(conn, sessionId),
+        insert: (input) => insertMessage(driver, input),
+        findById: (id) => findById(driver, id),
+        listRecent: (sessionId, limit) => listRecent(driver, sessionId, limit),
+        deleteSession: (sessionId) => deleteSession(driver, sessionId),
     };
 }
 

@@ -1,4 +1,4 @@
-// [scaffold] ID: T2.2 | Date: 2026-05-18 | Description: 内置工具 queryDatabase——在主库执行只读 SQL（仅 SELECT）
+// [refactor] ID: V1.5-A.1-S4 | Date: 2026-05-19 | Description: 内置工具 queryDatabase——只读 SELECT（async 契约；走 driver.query）
 'use strict';
 
 const { z } = require('zod');
@@ -21,8 +21,8 @@ function ensureReadOnly(sql) {
 
 async function handler(params, context = {}) {
     ensureReadOnly(params.sql);
-    const db = context.db || getDb();
-    const rows = db.prepare(params.sql).all(...params.params);
+    const driver = context.db || getDb();
+    const { rows } = await driver.query(params.sql, params.params);
     return { rowCount: rows.length, rows };
 }
 

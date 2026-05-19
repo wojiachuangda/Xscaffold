@@ -2,8 +2,8 @@
 'use strict';
 
 const path = require('path');
-const Database = require('better-sqlite3');
 const request = require('supertest');
+const { createSqliteDriver } = require('../../src/infrastructure/database/drivers/sqliteDriver');
 
 const { createApp } = require('../../src/apiGateway/server');
 const { migrate } = require('../../src/infrastructure/database/migrate');
@@ -30,19 +30,19 @@ function buildLLMClient(echoText = 'mock-response') {
 /**
  * 启动一个完整系统，返回 app/db 与可直接操作的 workflowRegistry
  */
-function bootSystem(overrides = {}) {
-    const db = new Database(':memory:');
-    migrate({ db });
+async function bootSystem(overrides = {}) {
+    const driver = createSqliteDriver({ filename: ':memory:' });
+    await migrate({ driver });
     const workflowRegistry = overrides.workflowRegistry || createWorkflowRegistry();
     const app = createApp({
-        db,
+        db: driver,
         jwtSecret: JWT_SECRET,
         rateLimitBypass: true,
         workflowRegistry,
         llmClient: overrides.llmClient || buildLLMClient(),
         webhookProviders: { github: { secret: WEBHOOK_SECRET, workflowId: 'github-flow' } },
     });
-    return { app, db, workflowRegistry };
+    return { app, driver, workflowRegistry };
 }
 
 function waitForFinal(app, token, executionId, timeout = 2000) {
@@ -66,11 +66,11 @@ function waitForFinal(app, token, executionId, timeout = 2000) {
 describe('PRD US-01：定义并运行一个 Agent', () => {
     let ctx;
     let token;
-    beforeEach(() => {
-        ctx = bootSystem();
+    beforeEach(async () => {
+        ctx = await bootSystem();
         token = signTestToken({ sub: 'dev' }, JWT_SECRET);
     });
-    afterEach(() => ctx.db.close());
+    afterEach(() => ctx.driver.close());
 
     test('REST 创建 Agent → 立即查询 → 列表可见', async () => {
         const create = await request(ctx.app)
@@ -94,7 +94,7 @@ describe('PRD US-02：通过 YAML 配置一个工作流', () => {
         const cfg = await loadFromFile(path.join(FIXTURES, 'valid.json'));
         const registry = createWorkflowRegistry();
         registry.register('math-pipeline', cfg);
-        const ctx = bootSystem({ workflowRegistry: registry });
+        const ctx = await bootSystem({ workflowRegistry: registry });
         const token = signTestToken({ sub: 'dev' }, JWT_SECRET);
 
         const trigger = await request(ctx.app)
@@ -106,7 +106,7 @@ describe('PRD US-02：通过 YAML 配置一个工作流', () => {
         expect(final.status).toBe('SUCCESS');
         expect(final.result.sum.result).toBe(30);
         expect(final.result.double.result).toBe(60);
-        ctx.db.close();
+        await ctx.driver.close();
     });
 
     test('YAML 缺字段 → loadFromFile 抛 ValidationError', async () => {
@@ -117,7 +117,7 @@ describe('PRD US-02：通过 YAML 配置一个工作流', () => {
 
 describe('PRD US-03：通过 Webhook 触发工作流', () => {
     let ctx;
-    beforeEach(() => {
+    beforeEach(async () => {
         const registry = createWorkflowRegistry();
         registry.register('github-flow', {
             name: 'github-flow',
@@ -125,9 +125,9 @@ describe('PRD US-03：通过 Webhook 触发工作流', () => {
             nodes: [{ id: 'sum', type: 'tool', toolName: 'addNumbers', params: { a: 1, b: 1 } }],
             edges: [],
         });
-        ctx = bootSystem({ workflowRegistry: registry });
+        ctx = await bootSystem({ workflowRegistry: registry });
     });
-    afterEach(() => ctx.db.close());
+    afterEach(() => ctx.driver.close());
 
     test('合法签名 → 202 + 异步执行成功', async () => {
         const payload = Buffer.from(JSON.stringify({ event: 'push', ref: 'refs/heads/main' }));
@@ -158,7 +158,7 @@ describe('PRD US-04：查看 AI 的"思考-行动-观察"轨迹', () => {
     test('IOOR + spans 可查询；agent 节点带 profileHash', async () => {
         // 1) 先 boot 干净系统 + 创建 agent，拿到生成的 id
         const registry = createWorkflowRegistry();
-        const ctx = bootSystem({ workflowRegistry: registry });
+        const ctx = await bootSystem({ workflowRegistry: registry });
         const token = signTestToken({ sub: 'auditor' }, JWT_SECRET);
         const created = await request(ctx.app)
             .post('/agents')
@@ -192,12 +192,12 @@ describe('PRD US-04：查看 AI 的"思考-行动-观察"轨迹', () => {
         expect(trace.body.data.ioor[0].profileHash).toMatch(/^[a-f0-9]{64}$/);
         expect(trace.body.data.ioor[0].agentId).toBe(agentId);
 
-        ctx.db.close();
+        await ctx.driver.close();
     });
 
     test('IOOR 中敏感字段被脱敏', async () => {
         const registry = createWorkflowRegistry();
-        const ctx = bootSystem({ workflowRegistry: registry });
+        const ctx = await bootSystem({ workflowRegistry: registry });
         const token = signTestToken({ sub: 'auditor' }, JWT_SECRET);
         const ag = await request(ctx.app)
             .post('/agents')
@@ -220,6 +220,6 @@ describe('PRD US-04：查看 AI 的"思考-行动-观察"轨迹', () => {
         // password 字段不应出现明文，即使最终 user prompt 是渲染后的字符串
         const ioorStr = JSON.stringify(trace.body.data.ioor);
         expect(ioorStr).not.toContain('"password":"sk-xyz"');
-        ctx.db.close();
+        await ctx.driver.close();
     });
 });

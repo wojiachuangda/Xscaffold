@@ -1,4 +1,4 @@
-// [scaffold] ID: T4.4 | Date: 2026-05-18 | Description: Webhook 路由——签名校验后入队触发工作流
+// [refactor] ID: V1.5-A.1-S6 | Date: 2026-05-19 | Description: Webhook 路由——签名校验后入队触发工作流（async store）
 'use strict';
 
 const express = require('express');
@@ -31,7 +31,7 @@ function buildWebhookRouter(deps) {
             express.raw({ type: '*/*', limit: '256kb' }),
             sigMiddleware,
             validate({ params: ProviderParamSchema.partial() }),
-            asyncHandler(async (req, res) => handleGithub(req, res, deps, providers.github)),
+            asyncHandler((req, res) => handleGithub(req, res, deps, providers.github)),
         );
     }
 
@@ -47,7 +47,7 @@ async function handleGithub(req, res, deps, githubConfig) {
         throw new NotFoundError(`webhook 关联的工作流不存在: ${workflowId}`);
     }
     const payload = parseRawBody(req.body);
-    const execution = deps.executionStore.create({ workflowId, input: payload });
+    const execution = await deps.executionStore.create({ workflowId, input: payload });
     deps.queue.enqueue(WORKFLOW_QUEUE, {
         workflowId,
         executionId: execution.id,

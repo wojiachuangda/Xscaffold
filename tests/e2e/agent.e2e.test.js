@@ -1,31 +1,31 @@
 // [test] ID: T1.7 | Date: 2026-05-18 | Description: Agent CRUD 端到端冒烟测试（创建→查询→更新→删除全流程）
 'use strict';
 
-const Database = require('better-sqlite3');
 const request = require('supertest');
+const { createSqliteDriver } = require('../../src/infrastructure/database/drivers/sqliteDriver');
 
 const { createApp } = require('../../src/apiGateway/server');
 const { migrate } = require('../../src/infrastructure/database/migrate');
 const { buildRepository } = require('../../src/agentManager/agentRepository');
 
-function bootApp() {
-    const db = new Database(':memory:');
-    migrate({ db });
+async function bootApp() {
+    const driver = createSqliteDriver({ filename: ':memory:' });
+    await migrate({ driver });
     const app = createApp({
-        agentRepository: buildRepository(db),
-        db,
+        agentRepository: buildRepository(driver),
+        db: driver,
         authDisabled: true,
         rateLimitBypass: true,
     });
-    return { app, db };
+    return { app, driver };
 }
 
 describe('Agent CRUD E2E', () => {
     let ctx;
-    beforeEach(() => {
-        ctx = bootApp();
+    beforeEach(async () => {
+        ctx = await bootApp();
     });
-    afterEach(() => ctx.db.close());
+    afterEach(() => ctx.driver.close());
 
     test('健康检查', async () => {
         const r = await request(ctx.app).get('/healthz');

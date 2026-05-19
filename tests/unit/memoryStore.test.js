@@ -1,4 +1,4 @@
-// [test] ID: T5.1 | Date: 2026-05-18 | Description: memoryStore 单元测试（mock repository）
+// [test] ID: T5.1 | Date: 2026-05-19 | Description: memoryStore 单元测试（A.1 async；mock repository）
 'use strict';
 
 const { buildMemoryStore } = require('../../src/memoryManager/memoryStore');
@@ -6,10 +6,10 @@ const { ValidationError } = require('../../src/infrastructure/errors/AppError');
 
 function mockRepo() {
     return {
-        insert: jest.fn().mockReturnValue({ id: 'msg_1' }),
+        insert: jest.fn().mockResolvedValue({ id: 'msg_1' }),
         findById: jest.fn(),
-        listRecent: jest.fn().mockReturnValue([]),
-        deleteSession: jest.fn().mockReturnValue(3),
+        listRecent: jest.fn().mockResolvedValue([]),
+        deleteSession: jest.fn().mockResolvedValue(3),
     };
 }
 
@@ -18,37 +18,39 @@ describe('buildMemoryStore', () => {
         expect(() => buildMemoryStore()).toThrow();
     });
 
-    test('saveMessage 合法 → 调用 repo.insert', () => {
+    test('saveMessage 合法 → 调用 repo.insert', async () => {
         const repo = mockRepo();
         const store = buildMemoryStore(repo);
-        store.saveMessage({ sessionId: 's', role: 'user', content: 'hi' });
+        await store.saveMessage({ sessionId: 's', role: 'user', content: 'hi' });
         expect(repo.insert).toHaveBeenCalledTimes(1);
     });
 
-    test('saveMessage 非法 role → ValidationError', () => {
+    test('saveMessage 非法 role → ValidationError', async () => {
         const repo = mockRepo();
         const store = buildMemoryStore(repo);
-        expect(() => store.saveMessage({ sessionId: 's', role: 'fake', content: 'x' })).toThrow(ValidationError);
+        await expect(store.saveMessage({ sessionId: 's', role: 'fake', content: 'x' })).rejects.toThrow(
+            ValidationError,
+        );
     });
 
-    test('getHistory 默认窗口 = 10', () => {
+    test('getHistory 默认窗口 = 10', async () => {
         const repo = mockRepo();
         const store = buildMemoryStore(repo, { defaultWindow: 10 });
-        store.getHistory({ sessionId: 's' });
+        await store.getHistory({ sessionId: 's' });
         expect(repo.listRecent).toHaveBeenCalledWith('s', 10);
     });
 
-    test('getHistory 显式 limit 覆盖', () => {
+    test('getHistory 显式 limit 覆盖', async () => {
         const repo = mockRepo();
         const store = buildMemoryStore(repo, { defaultWindow: 10 });
-        store.getHistory({ sessionId: 's', limit: 5 });
+        await store.getHistory({ sessionId: 's', limit: 5 });
         expect(repo.listRecent).toHaveBeenCalledWith('s', 5);
     });
 
-    test('clearSession 透传', () => {
+    test('clearSession 透传', async () => {
         const repo = mockRepo();
         const store = buildMemoryStore(repo);
-        expect(store.clearSession('s')).toBe(3);
+        expect(await store.clearSession('s')).toBe(3);
         expect(repo.deleteSession).toHaveBeenCalledWith('s');
     });
 });

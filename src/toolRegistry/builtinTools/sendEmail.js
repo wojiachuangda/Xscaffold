@@ -13,8 +13,9 @@ const paramsSchema = z
     })
     .strict();
 
+// MVP：不真实发邮件，仅记录脱敏后的元数据。V1 接入 SMTP/SES——届时此 stub 改真异步
+// eslint-disable-next-line require-await
 async function handler(params) {
-    // MVP：不真实发邮件，仅记录脱敏后的元数据。V1 接入 SMTP/SES。
     const recipients = Array.isArray(params.to) ? params.to : [params.to];
     logger.info({ recipients, subject: params.subject, bodyLength: params.body.length }, 'sendEmail (stub) invoked');
     return {

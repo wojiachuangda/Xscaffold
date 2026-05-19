@@ -14,6 +14,8 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 const JWT_SECRET = 'perf-secret';
 
+// runScenario 包装 callback-style autocannon 为 Promise；async 修饰仅为接口一致
+// eslint-disable-next-line require-await
 async function runScenario(title, opts) {
     return new Promise((resolve, reject) => {
         /* eslint-disable no-console */

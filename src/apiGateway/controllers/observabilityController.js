@@ -1,4 +1,4 @@
-// [scaffold] ID: T5.5 | Date: 2026-05-18 | Description: 可观测性路由（trace 查询 + /metrics Prometheus 端点）
+// [refactor] ID: V1.5-A.1-S6 | Date: 2026-05-19 | Description: 可观测性路由（trace 查询 + /metrics Prometheus 端点；async store/repo）
 'use strict';
 
 const express = require('express');
@@ -18,9 +18,9 @@ function buildExecutionTraceRouter(deps) {
         '/:id/trace',
         validate({ params: ExecutionIdParamSchema }),
         asyncHandler(async (req, res) => {
-            deps.executionStore.requireById(req.params.id);
-            const spans = deps.traceCollector ? deps.traceCollector.listByExecution(req.params.id) : [];
-            const ioor = deps.ioorRepository ? deps.ioorRepository.listByExecution(req.params.id) : [];
+            await deps.executionStore.requireById(req.params.id);
+            const spans = deps.traceCollector ? await deps.traceCollector.listByExecution(req.params.id) : [];
+            const ioor = deps.ioorRepository ? await deps.ioorRepository.listByExecution(req.params.id) : [];
             res.json(success({ executionId: req.params.id, spans, ioor }));
         }),
     );
