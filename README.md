@@ -16,7 +16,8 @@
 | **Agent 管理** | REST CRUD，Zod 强校验，状态机隔离 |
 | **工作流编排** | DAG 拓扑执行，条件分支，节点级超时/重试 |
 | **配置驱动** | YAML/JSON 加载 + 热更新（chokidar 监听） |
-| **工具与插件** | 5 个内置工具 + `plugins/` 目录自动扫描 |
+| **工具与插件** | 13 个内置工具（含 9 个项目助理 Tool）+ `plugins/` 目录自动扫描 |
+| **项目助理** | 9-Tool 总控 Agent + 摘要闭环工作流，详见下文 |
 | **多轮记忆** | sessionId 维度的对话历史，自动注入 LLM |
 | **可观测性** | IOOR 全量记录 + node trace + Prometheus metrics |
 | **接入层** | JWT 认证 + 限流 + Webhook 签名 + 异步队列 |
@@ -72,6 +73,44 @@ curl -X POST http://localhost:3000/agents \
 
 ---
 
+## 🤖 项目助理 MVP（Project Assistant）
+
+> 一个总控型 Agent 闭环：跟踪项目进度、记录事件、创建提醒、调用外部常驻 HTTP Agent、输出项目摘要。
+> 它**不**直接写代码 / 审代码 / 自动 push / 任意命令执行。
+
+### 9 个固定 Tool
+
+| Tool | 职责 |
+|------|------|
+| `projectGetStatus` / `projectUpdateStatus` | 读取 / upsert 项目状态（首次调用自动落库） |
+| `taskList` / `taskUpsert` | 列出 / 创建更新任务 |
+| `eventRecord` | 记录不可变事件流水（落库前走脱敏通道） |
+| `reminderCreate` / `reminderListDue` | 创建 / 查询到期提醒 |
+| `externalAgentSend` | 调用白名单外部 HTTP Agent，URL 固定在服务端、全程审计留痕 |
+| `projectGenerateDigest` | 生成项目摘要（markdown / json，含最近 10 条事件） |
+
+### 闭环工作流
+
+`workflows/project-assistant-digest.yaml` 把 7 个 Tool 串成顺序闭环：
+
+```text
+projectGetStatus → taskList → reminderListDue → externalAgentSend
+→ eventRecord → projectUpdateStatus → projectGenerateDigest
+```
+
+`createApp` 启动时自动装载 `workflows/` 目录；坏 YAML 仅告警、不影响平台启动。
+
+### 一键验证
+
+```bash
+npm run smoke:project-assistant
+```
+
+该 smoke 会起一个临时 HTTP stub 扮演外部 Agent，走完整 `createApp` + HTTP 路径验证
+digest 工作流「可见 + 可执行」，并校验事件落库、外部调用审计、摘要生成。任一步失败即 exit 1。
+
+---
+
 ## 📁 项目结构
 
 ```
@@ -83,10 +122,12 @@ src/
 ├── workflowEngine/      # 编排引擎（executor / nodeRunner / stateMachine / selfHealing）
 ├── configManager/       # YAML/JSON 解析与热加载
 ├── toolRegistry/        # 工具注册中心 + 内置工具
-│   └── builtinTools/    # httpRequest / queryDatabase / readFile / addNumbers / sendEmail
+│   └── builtinTools/    # 通用工具 + projectAssistant/（9 个项目助理 Tool）
 ├── memoryManager/       # 多轮对话记忆
 ├── observability/       # IOOR / trace / metrics / 脱敏
-├── domain/audit/        # 审计降级通道
+├── domain/              # 领域模块
+│   ├── audit/           # 审计降级通道
+│   └── projectAssistant/# 项目助理 schemas / repositories / digest 构建
 └── infrastructure/      # DB / 队列 / LLM / 错误类
 ```
 
@@ -120,6 +161,7 @@ npm run lint              # ESLint 校验
 npm run lint:fix          # 自动修复
 npm run format            # Prettier 格式化
 npm run bench             # 性能压测
+npm run smoke:project-assistant  # 项目助理闭环 smoke
 ```
 
 ---
