@@ -158,7 +158,8 @@
 | §3 约束 4 Repository 模式 | ✅ | 所有 SQL 集中在 `*Repository.js` |
 | §4.2 IOOR 协议 | ✅ | ioorRecorder + ioor_records 表 |
 | §4.4 角色画像版本化 | ✅ | profileHash SHA-256 绑定 |
-| §4.5 双重脱敏管道 | ✅ | 存储前（redactSensitive）+ 日志（pino redact） |
+| §4.5 双重脱敏管道（存储 + 日志） | ✅ | 存储前（redactSensitive）+ 日志（pino redact） |
+| §4.5 SSE 流式脱敏拦截器 | ⚠️ INFO（未实现） | `architecture.md:261` / `PRD.md:133` 曾承诺；当前未起 SSE 端点，无拦截器；待 SSE 推送实装时补齐（见 §9） |
 | §5 有界自愈 ≤2 次 | ✅ | selfHealing.MAX_HEAL_ATTEMPTS=2 |
 | §5 失败锁死 STUCK | ✅ | StuckError → workflowExecutor 状态转 STUCK |
 
@@ -263,3 +264,20 @@ dependencies:    { prod:158, dev:645, optional:2, peer:1, total:802 }
 **CRITICAL: 0 | HIGH: 0 | MEDIUM: 2 | INFO: 2**
 
 剩余 MEDIUM：插件信任边界 / 插件来源校验（V2 / V1.5 路线图）
+
+---
+
+## 9. V1.5 Pino 异步日志补注（2026-05-20）
+
+### 9.1 Pino worker thread transport (V1.8.0)
+- 日志写入路径生产默认走 pino v9 worker thread，日志 I/O 离开热路径
+- **bounded log loss window**：worker 模式下非受控崩溃（kill -9 / 掉电）最多丢失主线程→worker 队列中未投递的日志；受控 shutdown 已 `await logger.flush(timeout=2s)`
+- 字段级脱敏 `pino redact.paths` 仍在主线程序列化阶段生效，**transport 切换不破坏双脱敏管道**
+
+### 9.2 SSE 流式脱敏（未实现，INFO 项）
+- `architecture.md:261` / `PRD.md:133` 历史承诺「双脱敏 = 存储 + SSE 流式」，但当前项目**未起 SSE 推送端点**，`apiGateway/` 下无 `redactSensitive` 引用
+- 评级 **INFO**：当前无 SSE 输出 → 无外泄面；待将来实装 SSE 推送（Agent 思考流可视化）时同步补 `redactSensitive` 拦截层
+- 不在 V1.5 scope；纳入 V2 backlog
+
+### 9.3 评级
+**CRITICAL: 0 | HIGH: 0 | MEDIUM: 2 | INFO: 3**（新增 SSE 流式脱敏 INFO 项）

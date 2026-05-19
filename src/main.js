@@ -43,9 +43,11 @@ function start() {
  * 第二步：依次释放资源（best-effort）。
  * - queue.close()：等待在途 worker 完成，关 ioredis 连接句柄
  * - ioorRecorder.close()：flush IOOR 缓冲并清定时器（受控 shutdown 的 flush 触发点）
+ * - flushLogger()：worker transport 模式下 flush 主线程→worker 的 in-flight 日志
  *
  * 注意：这是受控 shutdown 的 best-effort flush。非受控崩溃（kill -9 / 掉电）
- * 不在此保障内，详见 AA-SEAC §4.2 修订说明的 bounded loss window。
+ * 不在此保障内——IOOR 见 AA-SEAC §4.2 修订；日志见 CHANGELOG v1.8.0 的
+ * bounded log loss window 声明。
  */
 async function gracefulShutdown(app) {
     const deps = (app.locals && app.locals.deps) || {};
@@ -55,6 +57,24 @@ async function gracefulShutdown(app) {
     if (deps.ioorRecorder && typeof deps.ioorRecorder.close === 'function') {
         await deps.ioorRecorder.close();
     }
+    await flushLogger(2000);
+}
+
+/**
+ * flush pino 日志（worker transport 模式下避免丢日志）。
+ * 带超时兜底——坏 transport 也不能让 shutdown 永等。
+ */
+function flushLogger(timeoutMs) {
+    return Promise.race([
+        new Promise((resolve) => {
+            try {
+                logger.flush(() => resolve());
+            } catch (_) {
+                resolve();
+            }
+        }),
+        new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
 }
 
 if (require.main === module) {
