@@ -24,9 +24,7 @@ async function runScenario(title, opts) {
                 if (err) {
                     return reject(err);
                 }
-                console.log(
-                    `  reqs:    ${result.requests.average.toFixed(0)} req/s (P95: ${result.latency.p97_5}ms)`,
-                );
+                console.log(`  reqs:    ${result.requests.average.toFixed(0)} req/s (P95: ${result.latency.p97_5}ms)`);
                 const lat = result.latency;
                 console.log(`  latency: avg=${lat.average}ms p50=${lat.p50}ms p99=${lat.p99}ms`);
                 console.log(`  errors:  ${result.errors} timeouts: ${result.timeouts} 2xx: ${result['2xx']}`);

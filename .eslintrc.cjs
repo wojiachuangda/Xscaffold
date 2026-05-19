@@ -10,14 +10,13 @@ module.exports = {
         ecmaVersion: 2022,
         sourceType: 'script',
     },
-    extends: ['eslint:recommended'],
+    // 'prettier' 必须放在末尾：关闭所有与 Prettier 冲突的格式化规则
+    // .prettierrc.json 已严格对齐 AA-SEAC §1.2（4 空格 / 120 宽 / 单引号 / 分号），合规未弱化
+    extends: ['eslint:recommended', 'prettier'],
     rules: {
-        // AA-SEAC §1.2 缩进与格式
-        indent: ['error', 4, { SwitchCase: 1 }],
-        'linebreak-style': 'off',
-        quotes: ['error', 'single', { avoidEscape: true }],
-        semi: ['error', 'always'],
-        'max-len': ['error', { code: 120, ignoreUrls: true, ignoreStrings: true }],
+        // AA-SEAC §1.2 缩进/引号/分号/单行宽度 — 由 Prettier 接管
+        // .prettierrc.json: tabWidth=4 / singleQuote=true / semi=true / printWidth=120 / endOfLine=lf
+        // ESLint 不再重复定义，避免与 Prettier 互相打架
 
         // AA-SEAC §1.3 设计原则
         'max-lines-per-function': ['error', { max: 50, skipBlankLines: true, skipComments: true }],
