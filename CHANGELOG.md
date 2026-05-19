@@ -4,6 +4,49 @@
 
 ---
 
+## [1.8.0] - 2026-05-20
+
+### ⚡ V1.5 Pino 异步日志
+
+把生产环境日志写入从同步 SonicBoom 改为 pino v9 worker thread async transport，让日志 I/O 离开热路径。同步把 `LOG_TRANSPORT` / `LOG_PRETTY` 显式开关一并落地，结清 `PLAN_P6.md` 历史欠账。
+
+零 REST API 改动、零业务逻辑改动；唯一可观察的语义变化是「worker 模式下存在 bounded log loss window」，与 v1.7.0 IOOR 缓冲同款诚实声明范式。
+
+阶段开发记录见 `docs/planning/PLAN_V1.5-PINO-ASYNC.md`。
+
+### ⚠️ Semantic Change（非 REST API 破坏，需运维知悉）
+
+- **生产日志写入异步化**：`NODE_ENV=production`（或显式 `LOG_TRANSPORT=worker`）时 logger 走 pino v9 worker thread transport，主线程把序列化后的日志通过 MessagePort 投递给 worker，由 worker 异步写 stdout。
+- **bounded log loss window（诚实声明）**：
+  - 受控 shutdown（SIGTERM/SIGINT）已 `await logger.flush(timeout=2s)` 兜底——`main.js gracefulShutdown` 三步收尾：HTTP 停 → queue 关 → ioorRecorder 关 → logger flush
+  - **非受控崩溃（`kill -9` / 宿主机掉电 / OOM Kill）下，最多丢失主线程→worker MessagePort 队列中未投递的日志**。运维须知悉
+- **回滚开关**：设 `LOG_TRANSPORT=sync` 强制回到同步 SonicBoom 写入
+- **双脱敏管道不破**：`pino redact.paths` 仍在主线程序列化阶段生效，worker 收到的已是脱敏字符串
+
+### Added
+- `src/observability/schemas/loggerConfigSchema.js` — `level / transport / pretty` 三字段 Zod 契约
+- 环境变量：
+  - `LOG_TRANSPORT=auto|sync|worker`（默认 `auto`：production→worker，其它→sync）
+  - `LOG_PRETTY=auto|on|off`（默认 `auto`：非 production 且非 test→on，其它→off）
+- `.env.example` 补两组开关说明 + bounded log loss window 风险提示
+
+### Changed
+- `src/observability/logger.js` `createLogger` 重构：提取 `resolveTransportMode` / `resolvePrettyMode` 纯函数明确 auto 语义；新增 worker / sync / pretty 三分支；pretty 与 worker 互斥（pretty 自带 worker 子进程），pretty=on 优先
+- `src/main.js gracefulShutdown` 三步收尾末尾追加 `await flushLogger(2000)`，`Promise.race` 兜底防坏 transport 让 shutdown 永等
+
+### Docs
+- `docs/security/SECURITY_AUDIT.md` §4.5 双脱敏行扩展为「日志双脱敏 ✅ + SSE 流式脱敏 ⚠️ INFO」；新增 §9 V1.5 Pino 异步日志补注，含 SSE 流式脱敏未实现的诚实标注（架构文档历史承诺与现状偏差）
+
+### Quality
+- 测试：`tests/unit/logger.test.js` 新增 9 个用例（`LoggerConfigSchema` 默认 / 拒绝、`transport=sync|worker|auto` 三分支、`pretty=on` 互斥、`LOG_TRANSPORT` env 读取）
+- 本地门禁：536 passed / 15 skipped / 0 failed；`npm run lint` 0 error
+
+### Release Gate
+- 沿用纪律：**tag `v1.8.0` 推迟到 CI 通过后再打**
+- 无新外部服务依赖，CI 用现有 5 job 验收
+
+---
+
 ## [1.7.0] - 2026-05-20
 
 ### 🪣 V1.5 IOOR 批量缓冲

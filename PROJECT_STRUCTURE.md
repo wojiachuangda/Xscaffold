@@ -1,7 +1,7 @@
 # 🧭 AA-SEAC 实时项目文件拓扑树 (自动生成版)
 
 > **注意**：本文件由底层巡检工具 `pureTreeGenerator.js` 自动生成并覆盖刷新。请勿手动修改本文件。
-> **最新刷新时间**：`2026-05-19 19:35:28`
+> **最新刷新时间**：`2026-05-19 23:42:39`
 
 ```text
 src/
@@ -102,12 +102,13 @@ src/
 │   ├── ioorRecorder.js                  # 职责: IOOR 记录器——脱敏 + 契约校验 + 批量缓冲入队（V1.5：record 不再同步直插）
 │   ├── ioorRepository.js                # 职责: IOOR 记录存储（async 契约；SQL 仅在此文件）
 │   ├── ioorSchema.js                    # 职责: IOOR 协议契约（AA-SEAC §4.2 全量流式追踪）
-│   ├── logger.js                        # 职责: Pino logger 封装，集成敏感字段双重脱敏（AA-SEAC §4.5）
+│   ├── logger.js                        # 职责: Pino logger（双脱敏管道：redact.paths 主线程序列化阶段 + V1.5 worker thread async transport 让日志 I/O 离开热路径）
 │   ├── metricsExporter.js               # 职责: Prometheus 文本格式指标导出（4 个核心指标）
 │   ├── profileHash.js                   # 职责: Agent 画像 SHA-256 计算（AA-SEAC §4.4 角色画像版本化）
 │   ├── redact.js                        # 职责: 深度对象脱敏工具（用于 SSE 流式输出/IOOR 落库前的二次保险）
 │   ├── schemas/
-│   │   └── ioorBufferConfigSchema.js        # 职责: IOOR 缓冲配置 Zod 契约（批量大小 / flush 间隔；AA-SEAC §4.1 代码即契约）
+│   │   ├── ioorBufferConfigSchema.js        # 职责: IOOR 缓冲配置 Zod 契约（批量大小 / flush 间隔；AA-SEAC §4.1 代码即契约）
+│   │   └── loggerConfigSchema.js            # 职责: Logger 配置 Zod 契约（level / transport / pretty；AA-SEAC §4.1 代码即契约）
 │   ├── traceCollector.js                # 职责: 节点级 trace 采集器（async；startSpan/endSpan 封装持久化）
 │   ├── traceRepository.js               # 职责: node_traces 表 Repository（async 契约）
 │   └── traceSchema.js                   # 职责: 节点级 trace 契约
