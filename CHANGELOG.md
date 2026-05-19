@@ -4,6 +4,47 @@
 
 ---
 
+## [1.5.0] - 2026-05-20
+
+### 🧵 V1.5-B BullMQ + Redis 持久化队列
+
+在保留内存队列默认可跑的前提下，新增 BullMQ + Redis 持久化队列。通过 `QUEUE_DRIVER=bullmq` + `REDIS_URL` 切换；内存队列仍是默认路径。补齐此前缺失的持久化、重试、并发上限与独立 job 状态查询。
+
+复用 V1.5-A 确立的「适配器 + dispatch」与「CI 真验收 + 发布门禁」两个范式。零 repository / executor / workflow 业务逻辑改动。
+
+阶段开发记录见 `docs/planning/PLAN_V1.5-B.md`。
+
+#### Added
+- **`src/infrastructure/queue/bullmqAdapter.js`** — 基于 `bullmq` + `ioredis` 的队列适配器：
+  - per-name 懒建 `Queue` / `Worker`
+  - BullMQ 内部状态（waiting/active/completed/failed/...）经单一映射表归一为契约状态（PENDING/RUNNING/SUCCESS/FAILED）
+  - Worker `completed` / `failed` 事件桥接到契约的 `onJobComplete` 回调
+  - `close()` 按 `worker → queue → connection` 顺序释放，杜绝 ioredis 句柄泄漏
+  - `attempts`（重试）/ `concurrency`（并发）从配置注入
+- **`src/infrastructure/queue/index.js`** — `parseQueueConfig` + `createQueue` 工厂：按 `QUEUE_DRIVER` 显式 dispatch；`bullmq` 缺 `REDIS_URL`/`REDIS_TEST_URL` 即拒
+- **`src/infrastructure/queue/schemas/queueConfigSchema.js`** — `QueueConfigSchema`（memory/bullmq discriminated union）
+- 环境变量：`QUEUE_DRIVER`（默认 `memory`）/ `QUEUE_CONCURRENCY`（默认 5）/ `QUEUE_MAX_ATTEMPTS`（默认 1，不重试）；`.env.example` 补说明
+- 依赖：`bullmq@^5`（含 `ioredis`）
+- CI 新增 `test-redis` job：`services: redis:7` + `REDIS_TEST_URL`，与 `test-postgres` 平行
+- 测试：18 个 `bullmqAdapter` 单测（状态映射 / dispatch 配置解析）+ 6 个 BullMQ 集成测（enqueue→worker→getJob 流转 / 失败映射 / onJobComplete / 持久化跨连接），用独立 env `REDIS_TEST_URL` 触发，未设置 → 整 suite skip
+
+#### Changed
+- **队列契约统一异步化**：`enqueue` / `getJob` / `close` 改 async。`inMemoryAdapter` 内部逻辑不变，仅包 async 壳；BullMQ 原生异步
+- 涟漪极小：仅 `workflowController.triggerExecute` / `webhookController.handleGithub` 两处 `enqueue` 加 `await`
+- `server.js` `buildDependencies` 用 `createQueue(parseQueueConfig())` 替换裸 `createInMemoryAdapter()`；`app.locals.deps` 暴露依赖供停机使用
+
+#### Fixed
+- `src/main.js` 优雅停机补全：此前 `SIGTERM`/`SIGINT` 只 `server.close()`，内存 job 直接丢弃且队列资源未释放。现改为「先停 HTTP 收新请求 → 再 `await queue.close()` 等在途 job」，并保留 10s 硬超时兜底
+
+#### Quality
+- 本地门禁：500 passed / 15 skipped（PG 9 + Redis 6，本地无对应服务）/ 0 failed
+- `npm run lint` 0 error；`npm audit` 引入 bullmq 后仍 0 high+
+
+#### Release Gate
+- 沿用 V1.5-A.3 纪律：**tag `v1.5.0` 推迟到 CI `test-redis` job 实际通过后再打**
+
+---
+
 ## [1.4.0] - 2026-05-20
 
 ### 🐘 V1.5-A PostgreSQL 适配器

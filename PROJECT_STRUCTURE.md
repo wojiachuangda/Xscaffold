@@ -1,7 +1,7 @@
 # 🧭 AA-SEAC 实时项目文件拓扑树 (自动生成版)
 
 > **注意**：本文件由底层巡检工具 `pureTreeGenerator.js` 自动生成并覆盖刷新。请勿手动修改本文件。
-> **最新刷新时间**：`2026-05-19 16:23:11`
+> **最新刷新时间**：`2026-05-19 17:13:58`
 
 ```text
 src/
@@ -85,8 +85,12 @@ src/
 │   ├── llmClient/
 │   │   └── openaiClient.js                  # 职责: OpenAI 兼容 Chat Completion 客户端（IOOR 元数据抓取 + 重试 + 超时）
 │   └── queue/
-│       └── inMemoryAdapter.js               # 职责: 内存队列适配器（MVP 默认）——单进程异步任务派发
-├── main.js                          # 职责: 应用入口（启动 Express 服务，装配中间件与路由）
+│       ├── bullmqAdapter.js                 # 职责: BullMQ + Redis 持久化队列适配器（per-name Queue/Worker；async 契约；状态归一）
+│       ├── index.js                         # 职责: 队列 driver dispatch——按 QUEUE_DRIVER + REDIS_URL 选择 memory/bullmq 实现
+│       ├── inMemoryAdapter.js               # 职责: 内存队列适配器——单进程异步任务派发；V1.5-B 起 enqueue/getJob/close 改 async 以对齐统一契约
+│       └── schemas/
+│           └── queueConfigSchema.js             # 职责: 队列配置 Zod 契约——memory/bullmq 双分支 discriminated union（AA-SEAC §4.1 代码即契约）
+├── main.js                          # 职责: 应用入口——启动 Express + 优雅停机：先停 HTTP 收新请求，再 await queue.close() 等在途 job
 ├── memoryManager/
 │   ├── memoryRepository.js              # 职责: messages 表 Repository（async 契约；SQL 仅在此文件）
 │   ├── memorySchema.js                  # 职责: 会话消息契约（AA-SEAC §4.1 代码即契约）
