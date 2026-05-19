@@ -5,7 +5,8 @@ const projectGetStatus = require('./projectGetStatus');
 const projectUpdateStatus = require('./projectUpdateStatus');
 const taskList = require('./taskList');
 const taskUpsert = require('./taskUpsert');
+const eventRecord = require('./eventRecord');
 
-const PROJECT_ASSISTANT_TOOLS = [projectGetStatus, projectUpdateStatus, taskList, taskUpsert];
+const PROJECT_ASSISTANT_TOOLS = [projectGetStatus, projectUpdateStatus, taskList, taskUpsert, eventRecord];
 
 module.exports = { PROJECT_ASSISTANT_TOOLS };
