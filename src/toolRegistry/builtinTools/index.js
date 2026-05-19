@@ -6,8 +6,9 @@ const httpRequest = require('./httpRequest');
 const readFile = require('./readFile');
 const queryDatabase = require('./queryDatabase');
 const sendEmail = require('./sendEmail');
+const { PROJECT_ASSISTANT_TOOLS } = require('./projectAssistant');
 
-const BUILTIN_TOOLS = [addNumbers, httpRequest, readFile, queryDatabase, sendEmail];
+const BUILTIN_TOOLS = [addNumbers, httpRequest, readFile, queryDatabase, sendEmail, ...PROJECT_ASSISTANT_TOOLS];
 
 function registerBuiltins(registry) {
     for (const tool of BUILTIN_TOOLS) {
