@@ -1,4 +1,4 @@
-// [refactor] ID: V1.5-B | Date: 2026-05-20 | Description: BullMQ + Redis 持久化队列适配器（per-name Queue/Worker；async 契约；状态归一）
+// [refactor] ID: V1.5-B | Date: 2026-05-20 | Description: BullMQ + Redis 持久化队列适配器（per-name Queue/Worker；每实例独立 ioredis 连接；BullMQ error 事件兜底）
 'use strict';
 
 const { logger } = require('../../observability/logger');
@@ -38,8 +38,6 @@ function mapStatus(bullState) {
 
 /**
  * 把 BullMQ Job 实例归一为契约 sanitize 形态。
- * @param {{ id?: string, name?: string, returnvalue?: unknown, failedReason?: string, timestamp?: number, finishedOn?: number }} job
- * @param {string} status
  */
 function sanitize(job, status) {
     return {
@@ -54,16 +52,25 @@ function sanitize(job, status) {
 }
 
 /**
- * 构造 BullMQ 连接配置。
- * Worker 必须设置 maxRetriesPerRequest: null（bullmq 强制约束）。
+ * 为 Queue/Worker 各自建独立的 ioredis 连接（BullMQ 官方推荐：不要复用同一连接）。
+ * 全部连接由 state.ownedConnections 持有，close 时统一关。
  */
-function buildConnection(IORedis, connectionUrl) {
-    return new IORedis(connectionUrl, { maxRetriesPerRequest: null });
+function newConn(state) {
+    const conn = new state.IORedis(state.config.connectionUrl, { maxRetriesPerRequest: null });
+    state.ownedConnections.push(conn);
+    return conn;
 }
 
 /**
- * per-name 注册/复用 Queue 实例。
+ * 为 BullMQ 对象统一绑 'error' listener —— 防止 shutdown race 时
+ * "Connection is closed" 之类的事件被 Node EventEmitter 当作 ERR_UNHANDLED_ERROR 抛出。
  */
+function bindErrorHandler(emitter, label) {
+    emitter.on('error', (err) => {
+        logger.warn({ err: err?.message, label }, 'bullmq emitter error（已吸收）');
+    });
+}
+
 function getOrCreateQueue(state, name) {
     let entry = state.byName.get(name);
     if (entry?.queue) {
@@ -73,7 +80,8 @@ function getOrCreateQueue(state, name) {
         entry = { queue: null, worker: null };
         state.byName.set(name, entry);
     }
-    entry.queue = new state.bullmq.Queue(name, { connection: state.connection });
+    entry.queue = new state.bullmq.Queue(name, { connection: newConn(state) });
+    bindErrorHandler(entry.queue, `queue:${name}`);
     return entry.queue;
 }
 
@@ -88,7 +96,6 @@ async function enqueueOn(state, name, payload) {
 }
 
 async function getJobOn(state, jobId) {
-    // 单队列名场景：直接命中现存 Queue 实例
     for (const entry of state.byName.values()) {
         if (!entry.queue) {
             continue;
@@ -105,15 +112,17 @@ async function getJobOn(state, jobId) {
     return null;
 }
 
+function buildCompleteSnapshot(job, extra) {
+    return { ...job, ...extra };
+}
+
 function registerWorkerOn(state, name, workerFn) {
     if (typeof workerFn !== 'function') {
         throw new Error('worker 必须是函数');
     }
-    let entry = state.byName.get(name);
-    if (!entry) {
-        entry = { queue: null, worker: null };
-        state.byName.set(name, entry);
-    }
+    // 注册 worker 隐含该 name 的 queue 必须存在 —— 否则 getJob 无法遍历到
+    getOrCreateQueue(state, name);
+    const entry = state.byName.get(name);
     if (entry.worker) {
         throw new Error(`队列 ${name} 已注册 worker（每队列名仅一个）`);
     }
@@ -122,35 +131,39 @@ function registerWorkerOn(state, name, workerFn) {
         // eslint-disable-next-line require-await
         async (job) => workerFn(job.data, job),
         {
-            connection: state.connection,
+            connection: newConn(state),
             concurrency: state.config.concurrency,
         },
     );
+    bindErrorHandler(entry.worker, `worker:${name}`);
     entry.worker.on('completed', (job, result) => {
-        state.completeHandlers.forEach((h) => {
-            try {
-                h(sanitize({ ...job, returnvalue: result, finishedOn: Date.now() }, 'SUCCESS'));
-            } catch (err) {
-                logger.warn({ err: err.message }, 'onJobComplete handler 抛错（忽略）');
-            }
-        });
+        fanoutComplete(state, buildCompleteSnapshot(job, { returnvalue: result, finishedOn: Date.now() }), 'SUCCESS');
     });
     entry.worker.on('failed', (job, err) => {
         if (!job) {
             return;
         }
-        state.completeHandlers.forEach((h) => {
-            try {
-                h(sanitize({ ...job, failedReason: err?.message, finishedOn: Date.now() }, 'FAILED'));
-            } catch (handlerErr) {
-                logger.warn({ err: handlerErr.message }, 'onJobComplete handler 抛错（忽略）');
-            }
-        });
+        fanoutComplete(
+            state,
+            buildCompleteSnapshot(job, { failedReason: err?.message, finishedOn: Date.now() }),
+            'FAILED',
+        );
+    });
+}
+
+function fanoutComplete(state, jobSnapshot, status) {
+    const payload = sanitize(jobSnapshot, status);
+    state.completeHandlers.forEach((h) => {
+        try {
+            h(payload);
+        } catch (err) {
+            logger.warn({ err: err.message }, 'onJobComplete handler 抛错（忽略）');
+        }
     });
 }
 
 async function closeAll(state) {
-    // 顺序：worker → queue → connection；防止 worker 关闭过程中失去 redis 连接
+    // 顺序：worker → queue → 所有 owned ioredis 连接
     for (const entry of state.byName.values()) {
         if (entry.worker) {
             // eslint-disable-next-line no-await-in-loop
@@ -163,8 +176,16 @@ async function closeAll(state) {
             await entry.queue.close();
         }
     }
-    await state.connection.quit();
+    for (const conn of state.ownedConnections) {
+        try {
+            // eslint-disable-next-line no-await-in-loop
+            await conn.quit();
+        } catch (_) {
+            /* 已关 / 已断的连接 quit 失败可忽略 */
+        }
+    }
     state.byName.clear();
+    state.ownedConnections.length = 0;
     state.completeHandlers.length = 0;
 }
 
@@ -175,13 +196,13 @@ async function closeAll(state) {
  */
 function createBullmqAdapter(config) {
     const { bullmq, IORedis } = loadDeps();
-    const connection = buildConnection(IORedis, config.connectionUrl);
     const state = {
         bullmq,
-        connection,
+        IORedis,
         config,
         byName: new Map(),
         completeHandlers: [],
+        ownedConnections: [],
     };
     return {
         enqueue: (name, payload) => enqueueOn(state, name, payload),
