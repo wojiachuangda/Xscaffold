@@ -57,6 +57,54 @@ jobs:
           path: coverage/
           retention-days: 7
 
+  test-postgres:
+    name: PG Integration (postgres:16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # V1.5-A.3：真 PG 验收 job
+    # - 默认 SQLite job 路径完全不动；本 job 独立给 PG 路径一个失败可见性独立的信号
+    # - 注入 PG_TEST_URL 后，npm test 会 unskip tests/integration/postgresAdapter.integration.test.js
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      PG_TEST_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 与 lint-and-test 一致：强制源码编译规避 better-sqlite3 prebuilt 怪行为
+      - name: Rebuild better-sqlite3 from source
+        run: npm rebuild better-sqlite3 --build-from-source
+
+      - name: Test (SQLite default 482 + PG integration 8 全跑)
+        run: npm test
+
   secret-scan:
     name: Secret Scan (gitleaks)
     runs-on: ubuntu-latest

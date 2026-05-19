@@ -49,6 +49,20 @@ cp .env.example .env
 npm run migrate
 ```
 
+`DATABASE_URL` 支持两种协议（v1.4.0 起）：
+
+```bash
+# SQLite（默认，零外部依赖；in-memory 或本地文件）
+DATABASE_URL=sqlite:./data/data.db
+DATABASE_URL=sqlite::memory:
+
+# PostgreSQL（生产推荐；JSONB + GIN 索引落实 AA-SEAC §4.3）
+DATABASE_URL=postgres://user:pass@host:5432/dbname
+# 可选：PG_POOL_MAX=10（仅 postgres 生效，默认 10）
+```
+
+两种协议下 REST API 响应格式与时间戳输出二进制一致；切换后只需重跑 `npm run migrate`。
+
 ### 4) 启动开发服务
 ```bash
 npm run dev

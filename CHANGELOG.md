@@ -4,6 +4,87 @@
 
 ---
 
+## [1.4.0] - 2026-05-20
+
+### 🐘 V1.5-A PostgreSQL 适配器
+
+打通存储层 driver 抽象 → PG 驱动 → CI 真实 PG 验收。`DATABASE_URL` 现支持 `sqlite:` / `postgres://` 双协议；REST API 响应格式与现网行为零差异；SQLite 仍是默认路径。
+
+落地节奏分三阶段：A.1 全栈 async 重构 → A.2 pgDriver 与 PG 迁移 → A.3 CI 矩阵与发布收口。
+
+阶段开发记录见 `docs/planning/PLAN_V1.5-A.md` / `PLAN_V1.5-A.2.md` / `PLAN_V1.5-A.3.md`。
+
+---
+
+### A.1 — async repository contract（commit `52f4fe4`）
+
+**目标**：把所有 repository / service / controller 改为 async/await 契约，为引入 PG（async-only 驱动）扫清架构障碍。
+
+#### Changed
+- `src/infrastructure/database/drivers/` 引入 driver 抽象层：`driverInterface.js`（JSDoc 契约）+ `sqliteDriver.js`（better-sqlite3 的 async 包装）+ `index.js`（按 `DATABASE_URL` 协议 dispatch）
+- `connection.js` `getDb()` 返回 Driver 实例（暴露 `query / run / exec / transaction / close / migrationsDir / isUniqueViolation`），不再裸暴露 better-sqlite3
+- `migrate.js` 改真异步：`driver.exec` 应用迁移；事务式 INSERT `schema_migrations`
+- 5 个既有 repository（agent / memory / ioor / trace / audit）方法签名改 async；service / controller 链路全部加 `await`
+- `schemas/driverConfigSchema.js` 用 Zod discriminated union 定义 `DriverConfigSchema`
+
+#### Tests
+- 全部 repository 单测与集成测改 `await ...` 形式，与 async 契约对齐
+- A.1 完成时 SQLite 模式 372 → 拓展期间稳定增长，保留全部既有覆盖
+
+---
+
+### A.2 — PostgreSQL driver + 方言迁移（commit `18413c4`）
+
+**目标**：在 A.1 契约之上落 pgDriver，使 PG 与 SQLite 行为对 repository 层完全透明。
+
+#### Added
+- **`src/infrastructure/database/drivers/pgDriver.js`** — 基于 `pg` (node-postgres) 8.x 的 async Driver 实现：
+  - `?` → `$N` 占位符朴素重写（本仓库 SQL 全部参数化）
+  - `pg.types.setTypeParser(JSON / JSONB, identity)` 覆盖 → JSONB 列读出仍为字符串，repo 层 `JSON.parse(row.x)` 对两库通用，**零 repository 改动**
+  - `transaction(fn)`：从 Pool checkout 单 client，`BEGIN / COMMIT / ROLLBACK` 在同 client 上执行；ROLLBACK 失败仅 warn，原错误优先
+  - `isUniqueViolation`：识别 PG `23505` `unique_violation`
+- **`src/infrastructure/database/migrations/pg/` — 8 个 PG 方言迁移**：
+  - `000_init_helpers.sql` — `xs_iso_now()` 函数，输出与 SQLite `strftime('%Y-%m-%dT%H:%M:%fZ','now')` 二进制等价
+  - `001..007` — agents / executions / messages / node_traces / ioor_records & audit_dead_letters / pa_* / external_agent_calls
+  - JSON 列改 `JSONB`；时间戳列保持 `TEXT + xs_iso_now()` 默认（避免触碰每个 rowToEntity）
+  - **AA-SEAC §4.3**：`ioor_records` 的 `input / output / tool_calls / observations` 4 列建 GIN 倒排索引
+- `DriverKindSchema` 扩 `['sqlite', 'postgres']`；新增 `PgConfigSchema`（`connectionString` + 可选 `poolMax`）并入 discriminated union
+- `drivers/index.js` 按 `postgres://` / `postgresql://` 识别协议；可选 `PG_POOL_MAX` 环境变量
+- `.env.example` 双协议示例 + `PG_POOL_MAX` 说明
+- 依赖：`pg@^8`
+
+#### Changed
+- 现 7 个 SQLite 迁移 `git mv` 进 `migrations/sqlite/`；`sqliteDriver.MIGRATIONS_DIR` 指向新位置
+- `migrate.js` `SCHEMA_MIGRATIONS_DDL` 改方言中立（`CURRENT_TIMESTAMP` 替换 SQLite 专属 `datetime('now')`）
+
+#### Tests
+- 新增 `tests/unit/pgDriver.test.js` — 17 个纯函数单测覆盖占位符重写、`isUniqueViolation`、`parseDatabaseUrl` 协议识别、`PG_POOL_MAX` 解析
+- 新增 `tests/integration/postgresAdapter.integration.test.js` — 8 个真 PG 集成用例（migrate 跑全 8 迁移 / `xs_iso_now()` 格式 / UNIQUE→ConflictError / IOOR JSONB 往返 / JSONB 类型核查 / GIN 索引就位 / ROLLBACK 隔离 / COMMIT 持久化），用独立 env `PG_TEST_URL` 触发；未设置 → 整 suite skip
+- A.2 落地后本地基线：**482 passed / 8 skipped / 0 failed**
+
+---
+
+### A.3 — CI PG validation + release docs（本期）
+
+**目标**：让 PG 真路径在 CI 自动跑，闭环 A.1+A.2 的验收。
+
+#### CI / Chore
+- **`.github/workflows/ci.yml` 新增 `test-postgres` job**：
+  - `services: postgres:16`，`pg_isready` 健康检查，10 次重试
+  - 注入 `PG_TEST_URL=postgres://postgres:postgres@localhost:5432/postgres`
+  - 跑 `npm test` —— SQLite 默认 482 + 真 PG unskip 8 = **490/490** 期望
+  - 独立 job，与 `lint-and-test` 并行，**不污染既有 SQLite job 的失败信号**
+- `package.json.version` → `1.4.0`
+
+#### Docs
+- `README.md` 配置段补 PG 协议示例（badge 风格保持历史不动）
+- 本 CHANGELOG 条目按 A.1 / A.2 / A.3 子段记录完整脉络
+
+#### Release Gate
+- **tag `v1.4.0` 推迟到 CI `test-postgres` job 实际通过后再打**，commit 先落，避免 tag 指向未经 PG 验收的 HEAD
+
+---
+
 ## [1.3.0] - 2026-05-19
 
 ### 🤖 Project Assistant MVP
