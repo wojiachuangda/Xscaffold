@@ -66,8 +66,10 @@ function assertNoUserinfo(url) {
 }
 
 function assertNotIpLiteral(url) {
-    if (net.isIP(url.hostname) !== 0) {
-        // 直接是 IP 字面量（不经 DNS）——拒绝，除非白名单
+    // Node 20 的 URL.hostname 对 IPv6 字面量保留方括号（如 '[::1]'）；Node 22+ 已修正去括号。
+    // 这里统一剥离方括号后再用 net.isIP 判定，跨 Node 版本一致。
+    const host = url.hostname.replace(/^\[(.*)\]$/, '$1');
+    if (net.isIP(host) !== 0) {
         throw new ValidationError(`禁止直接以 IP 字面量为目标: ${url.hostname}`);
     }
 }
