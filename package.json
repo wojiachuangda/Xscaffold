@@ -16,6 +16,7 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "migrate": "node src/infrastructure/database/migrate.js",
+    "smoke:project-assistant": "node scripts/smoke/project-assistant-loop.js",
     "bench": "node scripts/perf/run-bench.js",
     "bench:server": "node scripts/perf/perf-server.js",
     "lint": "eslint src tests scripts",

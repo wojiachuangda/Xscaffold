@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 
@@ -21,6 +22,27 @@ async function loadFromFile(filePath) {
     const ext = path.extname(abs).toLowerCase();
     assertSupportedExtension(ext, abs);
     const raw = await readFileSafe(abs);
+    const parsed = parseByExtension(raw, ext, abs);
+    return validateSchema(parsed);
+}
+
+/**
+ * 同步版本——createApp 启动期装载用（避免把 createApp 改为 async）。
+ */
+function loadFromFileSync(filePath) {
+    const abs = path.resolve(filePath);
+    const ext = path.extname(abs).toLowerCase();
+    assertSupportedExtension(ext, abs);
+    let raw;
+    try {
+        raw = fsSync.readFileSync(abs, 'utf8');
+    } catch (err) {
+        throw new AppError(`配置文件读取失败: ${abs}`, {
+            code: 'CONFIG_READ_ERROR',
+            status: 400,
+            cause: err,
+        });
+    }
     const parsed = parseByExtension(raw, ext, abs);
     return validateSchema(parsed);
 }
@@ -126,4 +148,4 @@ function formatIssues(zodError) {
     }));
 }
 
-module.exports = { loadFromFile, validateSchema, toWorkflowDef };
+module.exports = { loadFromFile, loadFromFileSync, validateSchema, toWorkflowDef };

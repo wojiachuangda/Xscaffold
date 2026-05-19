@@ -76,4 +76,29 @@ async function loadFromDirectory({ dir, registry, loadFn }) {
     return { loaded, failed };
 }
 
-module.exports = { createWorkflowRegistry, loadFromDirectory };
+/**
+ * 同步版本——createApp 启动期装载用（避免把 createApp 改为 async）。
+ * 单文件失败不抛，归入 failed；调用方按需决定是否抛。
+ */
+function loadFromDirectorySync({ dir, registry, loadFnSync }) {
+    if (!fs.existsSync(dir)) {
+        return { loaded: [], failed: [] };
+    }
+    const files = fs.readdirSync(dir).filter((f) => /\.(ya?ml|json)$/i.test(f));
+    const loaded = [];
+    const failed = [];
+    for (const file of files) {
+        const id = path.basename(file, path.extname(file));
+        try {
+            const cfg = loadFnSync(path.join(dir, file));
+            registry.upsert(id, cfg);
+            loaded.push(id);
+        } catch (err) {
+            failed.push({ id, error: err.message });
+            logger.warn({ file, err: err.message }, 'workflow load failed');
+        }
+    }
+    return { loaded, failed };
+}
+
+module.exports = { createWorkflowRegistry, loadFromDirectory, loadFromDirectorySync };

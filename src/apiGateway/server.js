@@ -1,12 +1,16 @@
 // [refactor] ID: V1.5-A.1-S6 | Date: 2026-05-19 | Description: Express 应用工厂——装配中间件、路由、错误处理、可观测性（async store/repo）
 'use strict';
 
+const path = require('path');
+
 const express = require('express');
 
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
 const { createAuthMiddleware } = require('./middlewares/authMiddleware');
 const { createRateLimiter } = require('./middlewares/rateLimiter');
 const { success } = require('./response/envelope');
+const { logger } = require('../observability/logger');
+const { loadFromFileSync } = require('../configManager/configLoader');
 
 const { buildRouter: buildAgentRouter } = require('../agentManager/agentController');
 const { buildService } = require('../agentManager/agentService');
@@ -17,7 +21,7 @@ const { buildWebhookRouter } = require('./controllers/webhookController');
 const { buildExecutionTraceRouter, buildMetricsRouter } = require('./controllers/observabilityController');
 
 const { createInMemoryAdapter } = require('../infrastructure/queue/inMemoryAdapter');
-const { createWorkflowRegistry } = require('../workflowEngine/workflowRegistry');
+const { createWorkflowRegistry, loadFromDirectorySync } = require('../workflowEngine/workflowRegistry');
 const { buildExecutionStore } = require('../workflowEngine/executionStore');
 const { createNodeRunner } = require('../workflowEngine/nodeRunner');
 const { createWorkflowExecutor } = require('../workflowEngine/workflowExecutor');
@@ -59,7 +63,7 @@ function buildDependencies(overrides) {
         overrides.nodeRunner || createNodeRunner({ toolRegistry, agentService, llmClient, memoryStore, ioorRecorder });
     return {
         agentService,
-        workflowRegistry: overrides.workflowRegistry || createWorkflowRegistry(),
+        workflowRegistry: overrides.workflowRegistry || buildWorkflowRegistryWithAutoload(overrides),
         executionStore: overrides.executionStore || buildExecutionStore(overrides.db),
         queue: overrides.queue || createInMemoryAdapter(),
         executor: overrides.executor || createWorkflowExecutor(nodeRunner),
@@ -80,6 +84,37 @@ function buildToolRegistry() {
     const reg = createRegistry();
     registerBuiltins(reg);
     return reg;
+}
+
+const DEFAULT_WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', 'workflows');
+
+/**
+ * 启动期容错装载 workflows/——非严格模式下，单个坏文件不影响平台启动；
+ * 仅当显式 overrides.strictWorkflowLoad===true 时才把装载失败上抛。
+ */
+function buildWorkflowRegistryWithAutoload(overrides) {
+    const registry = createWorkflowRegistry();
+    const dir = overrides.workflowsDir || DEFAULT_WORKFLOWS_DIR;
+    const strict = overrides.strictWorkflowLoad === true;
+    try {
+        const { loaded, failed } = loadFromDirectorySync({
+            dir,
+            registry,
+            loadFnSync: loadFromFileSync,
+        });
+        if (strict && failed.length > 0) {
+            throw new Error(`strict 模式下 workflow 装载失败: ${failed.map((f) => f.id).join(', ')}`);
+        }
+        if (loaded.length > 0) {
+            logger.info({ dir, loaded }, 'workflows auto-loaded');
+        }
+    } catch (err) {
+        if (strict) {
+            throw err;
+        }
+        logger.warn({ dir, err: err.message }, '[startup] workflow auto-load skipped (non-strict)');
+    }
+    return registry;
 }
 
 function stubLLMClient() {
