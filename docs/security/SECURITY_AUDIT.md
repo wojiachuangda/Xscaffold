@@ -159,7 +159,7 @@
 | §4.2 IOOR 协议 | ✅ | ioorRecorder + ioor_records 表 |
 | §4.4 角色画像版本化 | ✅ | profileHash SHA-256 绑定 |
 | §4.5 双重脱敏管道（存储 + 日志） | ✅ | 存储前（redactSensitive）+ 日志（pino redact） |
-| §4.5 SSE 流式脱敏拦截器 | ⚠️ INFO（未实现） | `architecture.md:261` / `PRD.md:133` 曾承诺；当前未起 SSE 端点，无拦截器；待 SSE 推送实装时补齐（见 §9） |
+| §4.5 SSE 流式脱敏拦截器 | ✅ | `apiGateway/sse.js` `writeEvent` 唯一出口；`POST /agents/:id/invoke/stream` turn 级流式，事件经 `redactEvent` 脱敏后才落 socket（见 §9.2） |
 | §5 有界自愈 ≤2 次 | ✅ | selfHealing.MAX_HEAL_ATTEMPTS=2 |
 | §5 失败锁死 STUCK | ✅ | StuckError → workflowExecutor 状态转 STUCK |
 
@@ -274,10 +274,12 @@ dependencies:    { prod:158, dev:645, optional:2, peer:1, total:802 }
 - **bounded log loss window**：worker 模式下非受控崩溃（kill -9 / 掉电）最多丢失主线程→worker 队列中未投递的日志；受控 shutdown 已 `await logger.flush(timeout=2s)`
 - 字段级脱敏 `pino redact.paths` 仍在主线程序列化阶段生效，**transport 切换不破坏双脱敏管道**
 
-### 9.2 SSE 流式脱敏（未实现，INFO 项）
-- `architecture.md:261` / `PRD.md:133` 历史承诺「双脱敏 = 存储 + SSE 流式」，但当前项目**未起 SSE 推送端点**，`apiGateway/` 下无 `redactSensitive` 引用
-- 评级 **INFO**：当前无 SSE 输出 → 无外泄面；待将来实装 SSE 推送（Agent 思考流可视化）时同步补 `redactSensitive` 拦截层
-- 不在 V1.5 scope；纳入 V2 backlog
+### 9.2 SSE 流式脱敏（V2.2 已实现，2026-05-21）
+- `architecture.md:261` / `PRD.md:133` 历史承诺「双脱敏 = 存储 + SSE 流式」已兑现：新增 `POST /agents/:id/invoke/stream` turn 级流式端点 + `apiGateway/sse.js` 传输脱敏拦截层
+- `writeEvent` 是 SSE 唯一出口；每个事件经 `redactEvent` 深度脱敏 `toolCalls[].arguments` / `observations[].data`（承载 LLM / 工具的外部数据）后才落 socket，**强制不可绕过**
+- envelope 元数据（type / turnIndex / tokenUsage 等本系统自有数据）不脱敏——避免敏感词 `token` 误伤 `tokenUsage`
+- LLM 自由文本 `content` 不做内容启发式扫描，延续既有项目策略（与 IOOR / 日志脱敏一致）
+- 阶段开发记录见 `docs/planning/PLAN_V2.2-SSE-REDACT.md`
 
 ### 9.3 评级
-**CRITICAL: 0 | HIGH: 0 | MEDIUM: 2 | INFO: 3**（新增 SSE 流式脱敏 INFO 项）
+**CRITICAL: 0 | HIGH: 0 | MEDIUM: 2 | INFO: 2**（SSE 流式脱敏 INFO 项随 V2.2 实装关闭）

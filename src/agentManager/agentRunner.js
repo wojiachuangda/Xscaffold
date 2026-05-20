@@ -17,7 +17,7 @@ const DEFAULT_MAX_ITERATIONS = Number(process.env.AGENT_MAX_ITERATIONS) || 8;
  * @param {number} [params.maxIterations]
  * @returns {Promise<{ content, turns, tokenUsage, stopReason }>}
  */
-async function runAgentLoop({ agent, prompt, deps, ctx = {}, maxIterations = DEFAULT_MAX_ITERATIONS }) {
+async function runAgentLoop({ agent, prompt, deps, ctx = {}, maxIterations = DEFAULT_MAX_ITERATIONS, onEvent }) {
     const toolDefs = resolveAgentTools(agent, deps.toolRegistry);
     const openaiTools = toOpenAITools(toolDefs);
     const allowed = new Set(agent.tools || []);
@@ -31,15 +31,19 @@ async function runAgentLoop({ agent, prompt, deps, ctx = {}, maxIterations = DEF
 
         const calls = result.toolCalls || [];
         if (calls.length === 0) {
-            acc.turns.push({ turnIndex, content: result.content, toolCalls: [], observations: [] });
+            const turn = { turnIndex, content: result.content, toolCalls: [], observations: [] };
+            acc.turns.push(turn);
             await recordTurn({ agent, turnIndex, messages, result, observations: [], ctx, deps });
+            emitTurn(onEvent, turn);
             return finalize(acc, 'final');
         }
 
         messages.push(assistantToolCallMessage(result));
         const observations = await executeCalls(calls, allowed, deps, messages);
-        acc.turns.push({ turnIndex, content: result.content, toolCalls: calls, observations });
+        const turn = { turnIndex, content: result.content, toolCalls: calls, observations };
+        acc.turns.push(turn);
         await recordTurn({ agent, turnIndex, messages, result, observations, ctx, deps });
+        emitTurn(onEvent, turn);
     }
     return finalize(acc, 'max_iterations');
 }
@@ -128,6 +132,22 @@ async function recordTurn({ agent, turnIndex, messages, result, observations, ct
         observations,
         tokenUsage: result.tokenUsage ?? null,
         latencyMs: result.latencyMs ?? null,
+    });
+}
+
+// 流式钩子：每完成一个 turn 推一个 SSE turn 事件。onEvent 缺省时全程 no-op，
+// 同步 /invoke 路径与既有调用方零行为变化。
+function emitTurn(onEvent, turn) {
+    if (typeof onEvent !== 'function') {
+        return;
+    }
+    onEvent({
+        type: 'turn',
+        turnIndex: turn.turnIndex,
+        content: turn.content || '',
+        toolCalls: turn.toolCalls,
+        observations: turn.observations,
+        ts: new Date().toISOString(),
     });
 }
 
