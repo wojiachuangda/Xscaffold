@@ -1,6 +1,6 @@
 # Xscaffold WEBUI
 
-Independent operations console for Xscaffold. Vanilla ESM modules, no build step.
+Independent operations console for Xscaffold. Vanilla ESM modules + Tailwind CDN + design-token CSS. No build step.
 
 ## Run
 
@@ -35,56 +35,81 @@ $env:BACKEND_URL='http://localhost:3000'; npm start
 
 The UI stores the JWT token in browser `localStorage` and sends it as `Authorization: Bearer <token>`.
 
-## Structure (V2.1)
+## Structure
 
 ```
 WEBUI/
-├── index.html        Shell + modal markup; loads ./app.js as ES module
+├── index.html        Shell — SVG nav + viewBody swap + modal/toast
 ├── server.js         Static server + transparent /api/* reverse proxy
-├── styles.css        Layout/component styles (matches Uiconstraints)
-├── theme.css         CSS custom properties (color tokens)
-├── app.js            Bootstrap: collect DOM, load state, start router/poller
+├── tokens.css        Single source of design tokens (color/spacing/typography/components)
+├── tw-tokens.js      Tailwind CDN config bridging tokens.css variables
+├── app.css           Shell-level component styles (nav-icon, modal, toast, helpers)
+├── app.js            Bootstrap — collect DOM, load state, start router, kick off poller
 ├── lib/
 │   ├── api.js        fetch wrapper + envelope error parsing
 │   ├── state.js      Single global state + localStorage persistence
-│   ├── dom.js        Element id registry
-│   ├── router.js     Hash router (#/view or #/view/id)
+│   ├── dom.js        Shell-level element registry
+│   ├── router.js     Hash router (#/view or #/view/id) with whitelist + legacy redirects
 │   ├── poller.js     5s interval poller (visibility-aware, failure degrade)
 │   ├── modal.js      Trace/log modal controls
-│   ├── actions.js    Cross-view actions (runWorkflow, createAgent, openExecutionTrace)
+│   ├── actions.js    Cross-view actions (runWorkflow, openExecutionTrace, …)
 │   └── utils.js      escapeHtml / formatTime / showToast
 └── views/
-    ├── index.js      Dispatcher (state.view → renderer)
-    ├── components.js Shared HTML fragments + resource-list/action binders
-    ├── runtime.js
-    ├── inbox.js
-    ├── executions.js Includes status filter, workflow filter, pagination
-    ├── workflows.js
-    ├── agents.js
-    ├── assistant.js
-    └── settings.js
+    ├── index.js      Dispatcher (state.view → renderer) + nav highlight sync
+    ├── runtime.js    Runtime list + metrics/health/logs (live probes + mock placeholders)
+    ├── agents.js     Live /agents list + agent profile (mock tasks/history/automation ownership)
+    ├── automation.js Live /workflows list + execution history (mock trigger/schedule/IOO toggle)
+    ├── inbox.js      Failed executions filter + detail (mock trace skeleton + event timeline)
+    ├── executions.js Full executions list with status/workflow filter + pagination + trace modal
+    ├── assistant.js  project-assistant-digest manual trigger form (no nav entry, hash only)
+    └── settings.js   API base + JWT token + runtime info
 ```
 
 ## Routing
 
-Hash router. Examples:
+Hash router. Primary nav (4 icons):
 
 - `#/runtime` — Runtime overview (default)
-- `#/executions` — Executions list
-- `#/executions/exec_abc123` — Drill into a specific execution
+- `#/agents` — Agents profile
+- `#/automation` — Automation rules
 - `#/inbox` — Failed/stuck/timeout executions
-- `#/workflows/demo-add` — Workflow detail with manual trigger
-- `#/agents/<id>` — Agent profile
-- `#/settings` — Connection settings
+- `#/settings` — Connection settings (gear icon)
+
+Hash-only entries (no nav button):
+
+- `#/executions` — Full executions list with pagination
+- `#/assistant` — Project assistant digest trigger
+
+Legacy hash `#/workflows` automatically redirects to `#/automation`.
 
 Browser back/forward and full reload preserve the active view. Unknown hashes fall back to `#/runtime`.
 
 ## Auto refresh
 
-A poll loop runs every 5 seconds in the foreground tab. It pulls `/healthz`, `/readyz`, `/workflows`, `/workflows/executions` (with current filters), and `/agents`.
+A poll loop runs every 5 seconds in the foreground tab. It pulls `/healthz`, `/readyz`, `/workflows`, `/workflows/executions`, and `/agents`. View renderers consume `state.*` directly.
 
 - Pauses when the tab is hidden (`document.visibilityState === 'hidden'`).
 - After 3 consecutive failures the poller stops and a toast is shown. Reload the page to restart.
+
+## Design tokens
+
+All visual decisions go through `tokens.css` CSS variables. Tailwind CDN is loaded with `tw-tokens.js` mapping utility classes to those variables. Do not introduce arbitrary colors, sizes, or spacing — extend `tokens.css` first.
+
+## Backend field reality check
+
+Many design fields exceed what the current backend exposes. Live vs mock per view:
+
+| View | Live | Mock |
+|---|---|---|
+| runtime | `/healthz` `/readyz` summary | runtime list, uptime, heartbeat, workload, memory, spark, live logs, health checks |
+| agents | `/agents` list (name, model, tools, status, updatedAt) | tasks queue, execution history, automation ownership |
+| automation | `/workflows` registry + recent `executions` table | cron schedule, next run, retry policy, success rate spark, Issue Output Mode toggle |
+| inbox | `/workflows/executions?status=FAILED/STUCK/TIMEOUT` | trace step expansion, runtime event timeline |
+| executions | full `/workflows/executions` with pagination + trace modal | — |
+| assistant | `/workflows/project-assistant-digest/execute` | — |
+| settings | localStorage persisted | — |
+
+Mock placeholders are labeled `mock` in the UI so it stays honest.
 
 ## Browser support
 

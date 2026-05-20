@@ -1,21 +1,21 @@
-// [ui] ID: WEBUI-V2.1 | Date: 2026-05-20 | Description: View dispatcher mapping state.view to the active renderer
+// [ui] ID: WEBUI-V2-TOKENS | Date: 2026-05-20 | Description: View dispatcher mapping state.view → renderer; also syncs nav-icon is-active highlight
 'use strict';
 
 import { state } from '../lib/state.js';
 import { renderAgents } from './agents.js';
 import { renderAssistant } from './assistant.js';
+import { renderAutomation } from './automation.js';
 import { renderExecutions } from './executions.js';
 import { renderInbox } from './inbox.js';
 import { renderRuntime } from './runtime.js';
 import { renderSettings } from './settings.js';
-import { renderWorkflows } from './workflows.js';
 
 const RENDERERS = {
     runtime: renderRuntime,
+    agents: renderAgents,
+    automation: renderAutomation,
     inbox: renderInbox,
     executions: renderExecutions,
-    workflows: renderWorkflows,
-    agents: renderAgents,
     assistant: renderAssistant,
     settings: renderSettings,
 };
@@ -27,7 +27,7 @@ export function render() {
 }
 
 function syncNavHighlight() {
-    document.querySelectorAll('.nav-item').forEach((item) => {
-        item.classList.toggle('active', item.dataset.view === state.view);
+    document.querySelectorAll('#primaryNav [data-nav]').forEach((node) => {
+        node.classList.toggle('is-active', node.dataset.nav === state.view);
     });
 }

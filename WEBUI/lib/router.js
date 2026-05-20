@@ -1,17 +1,19 @@
-// [ui] ID: WEBUI-V2.1 | Date: 2026-05-20 | Description: Hash router parsing #/view or #/view/id with whitelist + default fallback
+// [ui] ID: WEBUI-V2-TOKENS | Date: 2026-05-20 | Description: Hash router (#/view or #/view/id) with whitelist + default fallback runtime
 'use strict';
 
 import { state } from './state.js';
 
 const VIEW_WHITELIST = new Set([
     'runtime',
+    'agents',
+    'automation',
     'inbox',
     'executions',
-    'workflows',
-    'agents',
     'assistant',
     'settings',
 ]);
+
+const LEGACY_REDIRECTS = { workflows: 'automation' };
 
 const DEFAULT_VIEW = 'runtime';
 const ID_PATTERN = /^[\w.-]{1,128}$/u;
@@ -47,12 +49,12 @@ function parseHash(hash) {
     if (!raw) {
         return { view: DEFAULT_VIEW, id: null };
     }
-    const [view, rawId] = raw.split('/');
+    const [rawView, rawId] = raw.split('/');
+    const view = LEGACY_REDIRECTS[rawView] || rawView;
     if (!VIEW_WHITELIST.has(view)) {
         return { view: DEFAULT_VIEW, id: null };
     }
-    const id = decodeId(rawId);
-    return { view, id };
+    return { view, id: decodeId(rawId) };
 }
 
 function decodeId(rawId) {

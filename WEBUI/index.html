@@ -1,81 +1,69 @@
-<!-- [ui] ID: WEBUI-MVP | Date: 2026-05-20 | Description: Xscaffold operations console shell -->
 <!doctype html>
+<!-- [ui] ID: WEBUI-V2-TOKENS | Date: 2026-05-20 | Description: Token-driven SPA shell — SVG nav + dynamic viewBody + token-styled modal/toast -->
 <html lang="zh-CN">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Xscaffold Console</title>
-    <link rel="stylesheet" href="./theme.css">
-    <link rel="stylesheet" href="./styles.css">
-    <script type="module" src="./app.js"></script>
+    <title>Xscaffold · Operations</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./tokens.css">
+    <link rel="stylesheet" href="./app.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="./tw-tokens.js"></script>
 </head>
-<body>
-    <div class="app-shell">
-        <aside class="workspace-sidebar" aria-label="Workspace navigation">
-            <div class="workspace-header">
-                <div class="workspace-mark">X</div>
-                <div>
-                    <div class="workspace-name">Xscaffold</div>
-                    <div class="workspace-subtitle">Operations</div>
-                </div>
-            </div>
-            <button class="quick-action" type="button" data-view="inbox">New issue</button>
-            <nav class="nav-group">
-                <div class="nav-label">Workspace</div>
-                <button class="nav-item active" type="button" data-view="runtime">Runtimes</button>
-                <button class="nav-item" type="button" data-view="inbox">Inbox</button>
-                <button class="nav-item" type="button" data-view="executions">Executions</button>
-                <button class="nav-item" type="button" data-view="workflows">Automations</button>
-                <button class="nav-item" type="button" data-view="agents">Agents</button>
-                <button class="nav-item" type="button" data-view="assistant">Project assistant</button>
-            </nav>
-            <nav class="nav-group bottom">
-                <div class="nav-label">Configuration</div>
-                <button class="nav-item" type="button" data-view="settings">Settings</button>
-            </nav>
-        </aside>
+<body class="h-screen overflow-hidden">
+    <div class="flex h-full">
+        <nav id="primaryNav" class="w-nav bg-canvas bd-r flex flex-col items-center py-3 shrink-0" aria-label="Primary">
+            <a href="#/runtime" class="w-8 h-8 flex items-center justify-center text-primary mb-3" aria-label="Workspace">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12L12 3l9 9-9 9-9-9z"/><path d="M8 12l4-4 4 4-4 4-4-4z"/></svg>
+            </a>
+            <a href="#/runtime" data-nav="runtime" class="nav-icon focus-ring mb-1" title="Runtime">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            </a>
+            <a href="#/agents" data-nav="agents" class="nav-icon focus-ring mb-1" title="Agents">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="9" cy="16" r="1.4"/><circle cx="15" cy="16" r="1.4"/><path d="M12 7v4M9 4h6"/></svg>
+            </a>
+            <a href="#/automation" data-nav="automation" class="nav-icon focus-ring mb-1" title="Automation">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </a>
+            <a href="#/inbox" data-nav="inbox" class="nav-icon focus-ring mb-1" title="Inbox">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.5 5.1L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/></svg>
+            </a>
+            <div class="flex-1"></div>
+            <a href="#/settings" data-nav="settings" class="nav-icon focus-ring mb-1" title="Settings">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </a>
+            <a href="#/settings" data-nav="user" class="nav-icon focus-ring" title="User">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a7 7 0 0 1 14 0v1"/></svg>
+            </a>
+        </nav>
 
-        <section class="resource-pane">
-            <header class="pane-header">
-                <div>
-                    <div id="resourceTitle" class="pane-title">Runtimes</div>
-                    <div id="resourceMeta" class="pane-meta">Backend runtime state</div>
-                </div>
-                <button id="refreshButton" class="icon-button" type="button" title="Refresh">R</button>
-            </header>
-            <div id="filterBar" class="filter-bar"></div>
-            <div id="resourceList" class="resource-list"></div>
-        </section>
-
-        <main class="detail-pane">
-            <header class="detail-header">
-                <div>
-                    <div id="detailCrumb" class="detail-crumb">Xscaffold</div>
-                    <h1 id="detailTitle">Runtime overview</h1>
-                </div>
-                <div id="detailActions" class="detail-actions"></div>
-            </header>
-            <section id="detailContent" class="detail-content"></section>
-        </main>
+        <div id="viewBody" class="flex-1 flex overflow-hidden"></div>
     </div>
 
-    <div id="modalBackdrop" class="modal-backdrop hidden">
-        <section class="log-modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-            <header class="modal-header">
-                <div>
-                    <h2 id="modalTitle">Execution trace</h2>
-                    <div id="modalMeta" class="pane-meta">Trace and IOOR records</div>
+    <div id="modalBackdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+        <section class="card modal-dialog flex flex-col" aria-labelledby="modalTitle">
+            <header class="h-12 px-4 flex items-center justify-between bd-b shrink-0">
+                <div class="min-w-0 flex-1">
+                    <h2 id="modalTitle" class="t-sm t-medium t-truncate">Trace</h2>
+                    <div id="modalMeta" class="t-xs text-tertiary t-truncate"></div>
                 </div>
-                <button id="closeModalButton" class="icon-button" type="button" title="Close">X</button>
+                <button id="closeModalButton" class="btn btn-ghost btn-icon focus-ring" title="Close">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                </button>
             </header>
-            <div class="modal-toolbar">
-                <input id="modalSearch" class="input" type="search" placeholder="Search records">
-                <button id="copyModalButton" class="secondary-button" type="button">Copy</button>
+            <div class="h-10 px-4 flex items-center gap-2 bd-b shrink-0">
+                <input id="modalSearch" class="input flex-1" type="search" placeholder="Search lines">
+                <button id="copyModalButton" class="btn btn-secondary focus-ring">Copy</button>
             </div>
-            <pre id="modalLog" class="log-view"></pre>
+            <pre id="modalLog" class="term flex-1 px-4 py-3 overflow-y-auto scroll-thin m-0"></pre>
         </section>
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="./app.js"></script>
 </body>
 </html>

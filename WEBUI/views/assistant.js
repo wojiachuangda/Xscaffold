@@ -1,112 +1,102 @@
-// [ui] ID: WEBUI-V2.1 | Date: 2026-05-20 | Description: Project assistant digest view with manual trigger form
+// [ui] ID: WEBUI-V2-TOKENS | Date: 2026-05-20 | Description: Project assistant view (token-styled) — manual digest workflow trigger; hidden from nav, accessible via hash #/assistant
 'use strict';
 
 import { runWorkflow } from '../lib/actions.js';
 import { els } from '../lib/dom.js';
 import { state } from '../lib/state.js';
-import { showToast } from '../lib/utils.js';
-import {
-    bindActionButtons,
-    bindResourceItems,
-    emptyHtml,
-    setPane,
-} from './components.js';
+import { escapeHtml, showToast } from '../lib/utils.js';
 
 const ASSISTANT_WORKFLOW_ID = 'project-assistant-digest';
 
 export function renderAssistant() {
-    const workflow = state.workflows.find((item) => item.id === ASSISTANT_WORKFLOW_ID) || null;
-    setPane(
-        'Project assistant',
-        workflow ? 'Digest workflow available' : 'Workflow not loaded',
-        '',
-    );
-    els.resourceList.innerHTML = workflow
-        ? assistantListHtml(workflow)
-        : emptyHtml(`${ASSISTANT_WORKFLOW_ID} not found`);
-    renderAssistantDetail(workflow);
-    bindResourceItems();
-    bindAssistantForm(workflow);
-    bindActionButtons();
-}
-
-function assistantListHtml(workflow) {
-    return `
-        <button class="resource-item selected" type="button" data-select="${workflow.id}">
-            <span class="dot success"></span>
-            <span>
-                <span class="item-title">${workflow.id}</span>
-                <span class="item-subtitle">digest runbook</span>
-            </span>
-            <span class="meta">assistant</span>
-        </button>
+    const workflow = (state.workflows || []).find((w) => w.id === ASSISTANT_WORKFLOW_ID);
+    els.viewBody.innerHTML = `
+        <main class="flex-1 overflow-y-auto scroll-thin">
+            <header class="h-12 px-6 flex items-center justify-between bd-b bg-panel">
+                <div class="flex items-center gap-3">
+                    <h1 class="t-base">Project Assistant</h1>
+                    <span class="t-xs text-secondary">digest runbook</span>
+                </div>
+            </header>
+            ${workflow ? formSectionHtml() : missingHtml()}
+        </main>
     `;
-}
-
-function renderAssistantDetail(workflow) {
-    els.detailCrumb.textContent = 'Workspace / Project assistant';
-    els.detailTitle.textContent = 'Digest runbook';
-    els.detailActions.innerHTML = workflow
-        ? '<button class="primary-button" data-action="runAssistant">Run digest</button>'
-        : '';
-    els.detailContent.innerHTML = assistantHtml(workflow);
-}
-
-function assistantHtml(workflow) {
-    const disabled = workflow ? '' : 'disabled';
-    return `
-        <section class="section">
-            <h2 class="section-title">Runbook</h2>
-            <ol class="stack">
-                <li>Read project status, tasks and due reminders.</li>
-                <li>Ask the configured external agent for analysis.</li>
-                <li>Record the digest event and update project summary.</li>
-                <li>Generate the final digest for human review.</li>
-            </ol>
-        </section>
-        <section class="section">
-            <h2 class="section-title">Manual trigger</h2>
-            <form id="assistantForm" class="form-grid">
-                <label>Project ID<input class="input" name="projectId" required value="demo-project" ${disabled}></label>
-                <label>Profile<input class="input" name="profile" required value="claudeHttp" ${disabled}></label>
-                <label>Session<input class="input" name="sessionId" value="manual-session" ${disabled}></label>
-                <label>Reminder before
-                    <input class="input" name="reminderBefore" value="${tomorrowIso()}" ${disabled}>
-                </label>
-                <label class="wide">Instruction
-                    <textarea class="textarea" name="instruction" ${disabled}>请检查当前项目状态，指出阻塞点，并给出下一步建议。</textarea>
-                </label>
-                <button class="primary-button wide" type="submit" ${disabled}>Run project assistant</button>
-            </form>
-        </section>
-    `;
-}
-
-function bindAssistantForm(workflow) {
-    if (!workflow) {
-        return;
+    if (workflow) {
+        document.getElementById('assistantForm').addEventListener('submit', runAssistantEvent);
     }
-    document.getElementById('assistantForm')?.addEventListener('submit', runAssistantEvent);
+}
+
+function formSectionHtml() {
+    return `
+        <section class="p-6">
+            <div class="card max-w-prose">
+                <div class="h-8 px-4 flex items-center bd-b"><span class="t-sm t-medium">Runbook</span></div>
+                <ol class="p-4 t-sm text-secondary flex flex-col gap-2">
+                    <li>1. Read project status, tasks and due reminders</li>
+                    <li>2. Ask the configured external agent for analysis</li>
+                    <li>3. Record the digest event and update project summary</li>
+                    <li>4. Generate the final digest for human review</li>
+                </ol>
+            </div>
+            <div class="card max-w-prose mt-6">
+                <div class="h-8 px-4 flex items-center bd-b"><span class="t-sm t-medium">Manual trigger</span></div>
+                <form id="assistantForm" class="p-4 flex flex-col gap-3">
+                    <div class="form-field">
+                        <label>Project ID</label>
+                        <input class="input" name="projectId" value="demo-project" required>
+                    </div>
+                    <div class="form-field">
+                        <label>Profile</label>
+                        <input class="input" name="profile" value="claudeHttp" required>
+                    </div>
+                    <div class="form-field">
+                        <label>Session ID</label>
+                        <input class="input" name="sessionId" value="manual-session">
+                    </div>
+                    <div class="form-field">
+                        <label>Reminder before</label>
+                        <input class="input" name="reminderBefore" value="${escapeHtml(tomorrowIso())}">
+                    </div>
+                    <div class="form-field">
+                        <label>Instruction</label>
+                        <textarea class="input" name="instruction" rows="3">检查项目状态并给出下一步建议。</textarea>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button class="btn btn-primary focus-ring" type="submit">Run digest</button>
+                        <span class="t-xs text-tertiary">Queues an execution and jumps to Executions view</span>
+                    </div>
+                </form>
+            </div>
+        </section>
+    `;
+}
+
+function missingHtml() {
+    return `
+        <section class="p-6">
+            <div class="card max-w-prose">
+                <div class="empty">Workflow <span class="t-mono">${ASSISTANT_WORKFLOW_ID}</span> not loaded. Check workflows/ directory.</div>
+            </div>
+        </section>
+    `;
 }
 
 async function runAssistantEvent(event) {
     event.preventDefault();
     const form = event.target;
     try {
-        await runWorkflow(ASSISTANT_WORKFLOW_ID, { input: readAssistantInput(form) });
+        await runWorkflow(ASSISTANT_WORKFLOW_ID, {
+            input: {
+                projectId: form.projectId.value.trim(),
+                profile: form.profile.value.trim(),
+                sessionId: form.sessionId.value.trim(),
+                reminderBefore: form.reminderBefore.value.trim(),
+                instruction: form.instruction.value.trim(),
+            },
+        });
     } catch (err) {
         showToast(err.message || 'Failed to run assistant');
     }
-}
-
-function readAssistantInput(form) {
-    return {
-        projectId: form.projectId.value.trim(),
-        profile: form.profile.value.trim(),
-        sessionId: form.sessionId.value.trim(),
-        reminderBefore: form.reminderBefore.value.trim(),
-        instruction: form.instruction.value.trim(),
-    };
 }
 
 function tomorrowIso() {

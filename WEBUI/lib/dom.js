@@ -1,25 +1,18 @@
-// [ui] ID: WEBUI-V2.1 | Date: 2026-05-20 | Description: DOM element singleton registry collected once on bootstrap
+// [ui] ID: WEBUI-V2-TOKENS | Date: 2026-05-20 | Description: Shell-level DOM registry — only shell elements collected; per-view DOM resolved inside view modules
 'use strict';
 
 export const els = {};
 
 const ELEMENT_IDS = [
-    'resourceTitle',
-    'resourceMeta',
-    'filterBar',
-    'resourceList',
-    'detailCrumb',
-    'detailTitle',
-    'detailActions',
-    'detailContent',
-    'refreshButton',
+    'viewBody',
+    'primaryNav',
     'modalBackdrop',
     'modalTitle',
     'modalMeta',
     'modalSearch',
     'modalLog',
-    'copyModalButton',
     'closeModalButton',
+    'copyModalButton',
     'toast',
 ];
 
