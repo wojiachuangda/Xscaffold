@@ -12,6 +12,7 @@ import { render } from './views/index.js';
 import { setSettingsOnSaved } from './views/settings.js';
 
 const POLL_INTERVAL_MS = 5000;
+const POLL_VIEWS = new Set(['runtime', 'inbox']);
 
 document.addEventListener('DOMContentLoaded', bootstrap);
 
@@ -39,27 +40,10 @@ async function initialRefresh() {
 
 async function pollTick() {
     await Promise.all([loadRuntimeProbes(), loadProtectedData()]);
-    if (hasActiveFormInput()) {
-        // 用户正在 input/textarea 打字 —— 跳过 render 避免清空内容 + 失焦
-        return;
+    // 仅对纯实时展示 view 重渲染；带交互的 view 脱离轮询路径，避免清空输入 + 失焦
+    if (POLL_VIEWS.has(state.view)) {
+        render();
     }
-    render();
-}
-
-function hasActiveFormInput() {
-    const el = document.activeElement;
-    if (!el) {
-        return false;
-    }
-    const tag = (el.tagName || '').toLowerCase();
-    if (tag === 'textarea') {
-        return true;
-    }
-    if (tag === 'input') {
-        const type = (el.type || 'text').toLowerCase();
-        return type !== 'button' && type !== 'submit' && type !== 'checkbox' && type !== 'radio';
-    }
-    return false;
 }
 
 async function loadRuntimeProbes() {
