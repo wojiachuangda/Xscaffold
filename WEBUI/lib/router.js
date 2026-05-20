@@ -6,6 +6,7 @@ import { state } from './state.js';
 const VIEW_WHITELIST = new Set([
     'runtime',
     'agents',
+    'sessions',
     'automation',
     'inbox',
     'executions',
