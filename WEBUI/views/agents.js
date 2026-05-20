@@ -168,7 +168,7 @@ function talkSectionHtml(agent) {
                     <span class="t-xs text-tertiary">${(agent.tools || []).length} tools available</span>
                 </div>
                 <div class="p-4">
-                    <textarea id="agent-prompt" class="input" rows="3" placeholder="给 agent 一句指令，它会自主调用绑定的工具完成任务…"></textarea>
+                    <textarea id="agent-prompt" class="input-area" rows="6" placeholder="给 agent 一句指令，它会自主调用绑定的工具完成任务…"></textarea>
                     <div class="flex items-center gap-2 mt-3">
                         <button id="agent-send" class="btn btn-primary focus-ring">Send</button>
                         <span id="agent-hint" class="t-xs text-tertiary">agent 循环调用工具直到给出答复（max 8 轮）</span>

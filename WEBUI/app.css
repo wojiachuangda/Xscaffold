@@ -107,6 +107,27 @@
     letter-spacing: 0.04em;
 }
 
+/* Multi-line text input (tokens.css .input is fixed 32px height, unfit for textarea) */
+.input-area {
+    width: 100%;
+    min-height: 120px;
+    padding: 10px 12px;
+    font-size: var(--text-sm);
+    line-height: var(--lh-body);
+    color: var(--text-primary);
+    background: var(--bg-panel);
+    border: 1px solid var(--border-input);
+    border-radius: var(--radius-input);
+    outline: none;
+    resize: vertical;
+    font-family: inherit;
+}
+.input-area:focus {
+    border-color: var(--color-primary);
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+}
+
 /* Code/log block for execution detail */
 .code-block {
     background: #0f0f0f;

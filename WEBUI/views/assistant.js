@@ -59,7 +59,7 @@ function formSectionHtml() {
                     </div>
                     <div class="form-field">
                         <label>Instruction</label>
-                        <textarea class="input" name="instruction" rows="3">检查项目状态并给出下一步建议。</textarea>
+                        <textarea class="input-area" name="instruction" rows="4">检查项目状态并给出下一步建议。</textarea>
                     </div>
                     <div class="flex items-center gap-2">
                         <button class="btn btn-primary focus-ring" type="submit">Run digest</button>
