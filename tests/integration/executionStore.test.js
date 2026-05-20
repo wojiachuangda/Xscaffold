@@ -55,6 +55,35 @@ describe('executionStore', () => {
         expect(f.error).toEqual({ code: 'X', message: 'm' });
     });
 
+    test('list 返回最近执行并支持 workflowId/status 过滤', async () => {
+        const first = await ctx.store.create({ workflowId: 'wf1', input: { n: 1 } });
+        await ctx.store.markFinal(first.id, {
+            status: 'FAILED',
+            result: null,
+            error: { code: 'X', message: 'm' },
+        });
+        const second = await ctx.store.create({ workflowId: 'wf2', input: { n: 2 } });
+        await ctx.store.markFinal(second.id, { status: 'SUCCESS', result: { ok: true }, error: null });
+
+        const all = await ctx.store.list({ limit: 10, offset: 0 });
+        const filtered = await ctx.store.list({ workflowId: 'wf2', status: 'SUCCESS', limit: 10, offset: 0 });
+
+        expect(all.total).toBe(2);
+        expect(all.items.map((item) => item.id)).toEqual(expect.arrayContaining([first.id, second.id]));
+        expect(filtered.total).toBe(1);
+        expect(filtered.items[0].id).toBe(second.id);
+    });
+
+    test('list 支持分页', async () => {
+        await ctx.store.create({ workflowId: 'wf1', input: null });
+        await ctx.store.create({ workflowId: 'wf1', input: null });
+
+        const page = await ctx.store.list({ limit: 1, offset: 1 });
+
+        expect(page.total).toBe(2);
+        expect(page.items).toHaveLength(1);
+    });
+
     test('requireById 不存在 → NotFoundError', async () => {
         await expect(ctx.store.requireById('exec_xyz')).rejects.toThrow(NotFoundError);
     });

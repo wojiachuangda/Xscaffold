@@ -40,10 +40,25 @@ const ExecutionIdParamSchema = z.object({
         .regex(/^exec_[a-z0-9]+$/iu),
 });
 
+const ExecutionListQuerySchema = z
+    .object({
+        workflowId: z
+            .string()
+            .min(1)
+            .max(128)
+            .regex(/^[\w-]+$/u)
+            .optional(),
+        status: ExecutionStatusSchema.optional(),
+        limit: z.coerce.number().int().min(1).max(200).default(50),
+        offset: z.coerce.number().int().min(0).default(0),
+    })
+    .strict();
+
 module.exports = {
     ExecutionStatusSchema,
     ExecutionSchema,
     ExecuteRequestSchema,
     WorkflowIdParamSchema,
     ExecutionIdParamSchema,
+    ExecutionListQuerySchema,
 };

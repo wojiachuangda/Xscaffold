@@ -106,6 +106,23 @@ describe('接入层 E2E', () => {
         expect(final.result.sum.result).toBe(30);
     });
 
+    test('GET /workflows/executions 返回最近执行列表', async () => {
+        const created = await request(ctx.app)
+            .post('/workflows/demo-add/execute')
+            .set('Authorization', `Bearer ${token}`)
+            .send({ input: { source: 'ui' } });
+        const final = await waitForFinal(ctx.executionStore, created.body.data.id);
+
+        const r = await request(ctx.app)
+            .get('/workflows/executions?status=SUCCESS&limit=10')
+            .set('Authorization', `Bearer ${token}`);
+
+        expect(final.status).toBe('SUCCESS');
+        expect(r.status).toBe(200);
+        expect(r.body.data.map((item) => item.id)).toContain(created.body.data.id);
+        expect(r.body.meta.total).toBeGreaterThanOrEqual(1);
+    });
+
     test('GET 不存在的 execution → 404', async () => {
         const r = await request(ctx.app)
             .get('/workflows/executions/exec_deadbeef')

@@ -41,6 +41,20 @@ function assertValidStatus(status) {
     }
 }
 
+async function listExecutions(driver, filters = {}) {
+    const normalized = normalizeListFilters(filters);
+    const { whereSql, params } = buildListWhere(normalized);
+    const countResult = await driver.query(`SELECT COUNT(*) AS total FROM executions${whereSql}`, params);
+    const pageResult = await driver.query(
+        `SELECT * FROM executions${whereSql} ORDER BY started_at DESC LIMIT ? OFFSET ?`,
+        [...params, normalized.limit, normalized.offset],
+    );
+    return {
+        items: pageResult.rows.map(rowToEntity),
+        total: Number(countResult.rows[0]?.total || 0),
+    };
+}
+
 function buildExecutionStore(driverOrUndefined) {
     const driver = driverOrUndefined || getDb();
 
@@ -91,7 +105,34 @@ function buildExecutionStore(driverOrUndefined) {
         await driver.run("UPDATE executions SET status = 'RUNNING' WHERE id = ?", [id]);
     }
 
-    return { create, findById, requireById, markFinal, markRunning };
+    const list = (filters) => listExecutions(driver, filters);
+    return { create, findById, list, requireById, markFinal, markRunning };
+}
+
+function normalizeListFilters(filters) {
+    return {
+        workflowId: filters.workflowId,
+        status: filters.status,
+        limit: filters.limit ?? 50,
+        offset: filters.offset ?? 0,
+    };
+}
+
+function buildListWhere(filters) {
+    const clauses = [];
+    const params = [];
+    if (filters.workflowId) {
+        clauses.push('workflow_id = ?');
+        params.push(filters.workflowId);
+    }
+    if (filters.status) {
+        clauses.push('status = ?');
+        params.push(filters.status);
+    }
+    return {
+        whereSql: clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '',
+        params,
+    };
 }
 
 module.exports = { buildExecutionStore };

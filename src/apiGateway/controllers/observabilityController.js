@@ -6,7 +6,7 @@ const express = require('express');
 const { asyncHandler } = require('../middlewares/asyncHandler');
 const { validate } = require('../middlewares/validateMiddleware');
 const { success } = require('../response/envelope');
-const { ExecutionIdParamSchema } = require('../../workflowEngine/executionSchema');
+const { ExecutionIdParamSchema, ExecutionListQuerySchema } = require('../../workflowEngine/executionSchema');
 const { AuthError } = require('../../infrastructure/errors/AppError');
 const { timingSafeStringEqual } = require('../../infrastructure/security/timingSafe');
 
@@ -18,6 +18,14 @@ const BEARER_PATTERN = /^Bearer\s+(\S+)$/i;
  */
 function buildExecutionTraceRouter(deps) {
     const router = express.Router();
+    router.get(
+        '/',
+        validate({ query: ExecutionListQuerySchema }),
+        asyncHandler(async (req, res) => {
+            const { items, total } = await deps.executionStore.list(req.query);
+            res.json(success(items, { total, limit: req.query.limit, offset: req.query.offset }));
+        }),
+    );
     router.get(
         '/:id/trace',
         validate({ params: ExecutionIdParamSchema }),
