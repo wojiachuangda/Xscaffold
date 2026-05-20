@@ -24,20 +24,38 @@ const TASK_TONE = {
 };
 const PRI_TONE = { low: 'text-tertiary', normal: 'text-secondary', high: 'text-warning', urgent: 'text-error' };
 
-const MOCK_HISTORY = [
-    { t: '14:02 · just now', state: 'ok', title: 't_91ac · normalize batch', d: '0.92s' },
-    { t: '13:58', state: 'ok', title: 't_91ab · normalize batch', d: '1.84s' },
-    { t: '13:55', state: 'fail', title: 't_91aa · reconcile partition p-2', d: '4.20s · timeout, retried' },
-    { t: '13:50', state: 'ok', title: 't_91a9 · normalize batch', d: '1.12s' },
-    { t: '13:45', state: 'ok', title: 't_91a8 · re-emit dropped (s3)', d: '2.31s' },
-    { t: '13:34', state: 'skip', title: 't_91a6 · skipped (empty payload)', d: '—' },
-];
+const HISTORY_LIMIT = 20;
 
-const HIST_TONE = {
-    ok: { dot: 'dot-success', text: 'text-success', label: 'ok' },
-    fail: { dot: 'dot-error', text: 'text-error', label: 'failed' },
-    skip: { dot: 'dot-neutral', text: 'text-tertiary', label: 'skipped' },
-};
+function historyStorageKey(agentId) {
+    return `xscaffold.agent.history.${agentId}`;
+}
+
+function loadHistory(agentId) {
+    try {
+        const raw = localStorage.getItem(historyStorageKey(agentId));
+        return raw ? JSON.parse(raw) : [];
+    } catch (_err) {
+        return [];
+    }
+}
+
+function pushHistory(agentId, entry) {
+    const list = [entry, ...loadHistory(agentId)].slice(0, HISTORY_LIMIT);
+    try {
+        localStorage.setItem(historyStorageKey(agentId), JSON.stringify(list));
+    } catch (_err) {
+        /* localStorage 满或不可用,忽略 */
+    }
+    return list;
+}
+
+function clearHistory(agentId) {
+    try {
+        localStorage.removeItem(historyStorageKey(agentId));
+    } catch (_err) {
+        /* ignore */
+    }
+}
 
 const MOCK_AUTOMATIONS = [
     { name: 'eu-feed-ingest', trig: 'cron', next: 'every 5m' },
@@ -146,9 +164,16 @@ function renderDetail(agent) {
         <section class="grid grid-cols-3 gap-6 p-6">
             <div class="card col-span-2">
                 <div class="h-8 px-4 flex items-center justify-between bd-b">
-                    <div class="flex items-center gap-2"><span class="t-sm t-medium">Execution History</span><span class="t-xs text-tertiary">·</span><span class="t-xs text-secondary">mock · last 24h</span></div>
+                    <div class="flex items-center gap-2">
+                        <span class="t-sm t-medium">Talk history</span>
+                        <span class="t-xs text-tertiary">·</span>
+                        <span id="ag-history-count" class="t-xs text-secondary">${loadHistory(agent.id).length}</span>
+                    </div>
+                    <button id="ag-history-clear" class="btn btn-ghost btn-icon focus-ring" title="Clear history">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                    </button>
                 </div>
-                <ol class="p-4 flex flex-col gap-3">${MOCK_HISTORY.map(historyItemHtml).join('')}</ol>
+                <ol id="ag-history-list" class="p-4 flex flex-col gap-3">${historyListInnerHtml(agent.id)}</ol>
             </div>
             <div class="card">
                 <div class="h-8 px-4 flex items-center justify-between bd-b"><span class="t-sm t-medium">Automation Ownership</span><span class="t-xs text-tertiary">mock</span></div>
@@ -157,6 +182,52 @@ function renderDetail(agent) {
         </section>
     `;
     bindTalk(agent);
+    bindHistoryClear(agent);
+}
+
+function historyListInnerHtml(agentId) {
+    const list = loadHistory(agentId);
+    if (list.length === 0) {
+        return '<div class="empty">暂无对话历史</div>';
+    }
+    return list.map(historyEntryHtml).join('');
+}
+
+function historyEntryHtml(entry) {
+    const ok = entry.stopReason === 'final';
+    const dot = ok ? 'dot-success' : 'dot-warning';
+    return `
+        <li class="tl">
+            <span class="tl-dot ${dot}"></span>
+            <div class="flex items-baseline justify-between gap-3">
+                <div class="t-xs text-tertiary t-num">${escapeHtml(formatTime(entry.ts))}</div>
+                <div class="t-xs text-secondary">${entry.turns} turns · ${entry.tokenTotal} tokens · ${escapeHtml(entry.stopReason)}</div>
+            </div>
+            <div class="t-sm mt-1 text-secondary">→ ${escapeHtml(entry.prompt)}</div>
+            <div class="t-sm mt-1">${escapeHtml(entry.content || '(empty)')}</div>
+        </li>
+    `;
+}
+
+function refreshHistoryBlock(agentId) {
+    const list = document.getElementById('ag-history-list');
+    const count = document.getElementById('ag-history-count');
+    if (list) {
+        list.innerHTML = historyListInnerHtml(agentId);
+    }
+    if (count) {
+        count.textContent = String(loadHistory(agentId).length);
+    }
+}
+
+function bindHistoryClear(agent) {
+    document.getElementById('ag-history-clear')?.addEventListener('click', () => {
+        if (!confirm('清空 ' + agent.name + ' 的对话历史?')) {
+            return;
+        }
+        clearHistory(agent.id);
+        refreshHistoryBlock(agent.id);
+    });
 }
 
 function talkSectionHtml(agent) {
@@ -199,7 +270,17 @@ async function invokeAgent(agent, sendBtn, promptEl) {
     setBusy(sendBtn, resultEl, true);
     try {
         const payload = await api(`/agents/${agent.id}/invoke`, { method: 'POST', body: { prompt } });
-        resultEl.innerHTML = invokeResultHtml(payload.data);
+        const data = payload.data;
+        resultEl.innerHTML = invokeResultHtml(data);
+        pushHistory(agent.id, {
+            ts: new Date().toISOString(),
+            prompt,
+            content: data.content || '',
+            stopReason: data.stopReason,
+            turns: (data.turns || []).length,
+            tokenTotal: data.tokenUsage?.total ?? 0,
+        });
+        refreshHistoryBlock(agent.id);
     } catch (err) {
         resultEl.innerHTML = `<div class="t-sm text-error">${escapeHtml(err.message || 'invoke failed')}</div>`;
     } finally {
@@ -286,25 +367,6 @@ function taskItemHtml(t) {
             <div class="flex items-center justify-between mt-1 pl-4">
                 <span class="t-xs text-tertiary">priority · <span class="${PRI_TONE[t.priority]}">${t.priority}</span></span>
                 <span class="t-xs text-secondary t-num">${t.eta}</span>
-            </div>
-        </li>
-    `;
-}
-
-function historyItemHtml(h) {
-    const tone = HIST_TONE[h.state];
-    return `
-        <li class="tl">
-            <span class="tl-dot ${tone.dot}"></span>
-            <div class="flex items-baseline justify-between gap-4">
-                <div class="min-w-0">
-                    <div class="t-sm t-truncate">${escapeHtml(h.title)}</div>
-                    <div class="t-xs text-tertiary t-num mt-1">${h.t}</div>
-                </div>
-                <div class="flex items-center gap-4 shrink-0">
-                    <span class="t-xs t-mono text-secondary">${h.d}</span>
-                    <span class="t-xs t-medium ${tone.text}">${tone.label}</span>
-                </div>
             </div>
         </li>
     `;
