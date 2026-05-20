@@ -137,9 +137,28 @@
 .filter-bar {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
     padding: 12px 14px;
     border-bottom: 1px solid var(--line);
+}
+
+.filter-label {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.input.compact,
+.select.compact {
+    width: auto;
+    min-width: 96px;
+    height: 28px;
+    padding: 0 8px;
+    font-size: 12px;
 }
 
 .resource-list {
