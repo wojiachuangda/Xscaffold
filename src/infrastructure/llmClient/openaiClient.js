@@ -29,19 +29,31 @@ function createOpenAIClient(options = {}) {
     const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
     const fetchImpl = options.fetchImpl ?? global.fetch;
 
-    async function chat({ model, messages, temperature, maxTokens, timeoutMs = DEFAULT_TIMEOUT_MS, retries = 1 }) {
+    async function chat({
+        model,
+        messages,
+        tools,
+        temperature,
+        maxTokens,
+        timeoutMs = DEFAULT_TIMEOUT_MS,
+        retries = 1,
+    }) {
         if (!apiKey) {
             throw new LLMError('OPENAI_API_KEY 未配置');
         }
-        const body = buildRequestBody({ model, messages, temperature, maxTokens });
+        const body = buildRequestBody({ model, messages, tools, temperature, maxTokens });
         return await invokeWithRetry({ fetchImpl, baseUrl, apiKey, body, timeoutMs, retries });
     }
 
     return { chat };
 }
 
-function buildRequestBody({ model, messages, temperature, maxTokens }) {
+function buildRequestBody({ model, messages, tools, temperature, maxTokens }) {
     const body = { model, messages };
+    if (Array.isArray(tools) && tools.length > 0) {
+        body.tools = tools;
+        body.tool_choice = 'auto';
+    }
     if (temperature !== undefined) {
         body.temperature = temperature;
     }
@@ -109,12 +121,39 @@ function normalizeChatResponse(payload, latencyMs, requestBody) {
     return {
         content: message.content ?? '',
         reasoning_content: message.reasoning_content ?? null,
+        toolCalls: parseToolCalls(message.tool_calls),
         finishReason: choice.finish_reason ?? null,
         tokenUsage: extractTokenUsage(payload.usage),
         model: payload.model ?? requestBody.model,
         latencyMs,
         raw: payload,
     };
+}
+
+/**
+ * OpenAI tool_calls: [{ id, type:'function', function:{ name, arguments:'<json string>' } }]
+ * → [{ id, name, arguments:<object> }]；arguments 解析失败时保留 { _raw: <string> }。
+ */
+function parseToolCalls(toolCalls) {
+    if (!Array.isArray(toolCalls)) {
+        return [];
+    }
+    return toolCalls.map((call) => ({
+        id: call.id,
+        name: call.function?.name,
+        arguments: safeParseArgs(call.function?.arguments),
+    }));
+}
+
+function safeParseArgs(argsString) {
+    if (typeof argsString !== 'string' || argsString.trim() === '') {
+        return {};
+    }
+    try {
+        return JSON.parse(argsString);
+    } catch (_err) {
+        return { _raw: argsString };
+    }
 }
 
 function extractTokenUsage(usage) {

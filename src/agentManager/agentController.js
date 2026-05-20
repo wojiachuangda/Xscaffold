@@ -8,14 +8,38 @@ const { validate } = require('../apiGateway/middlewares/validateMiddleware');
 const { asyncHandler } = require('../apiGateway/middlewares/asyncHandler');
 const { success } = require('../apiGateway/response/envelope');
 const { CreateAgentSchema, UpdateAgentSchema, ListAgentsFilterSchema } = require('./agentSchema');
+const { runAgentLoop, newInvocationId } = require('./agentRunner');
 
 const IdParamSchema = z.object({ id: z.string().min(1).max(64) });
 
+const InvokeAgentSchema = z
+    .object({
+        prompt: z.string().min(1).max(8000),
+        sessionId: z.string().min(1).max(128).optional(),
+    })
+    .strict();
+
 /**
  * @param {{ createAgent, updateAgent, deleteAgent, getAgentById, listAgents }} service
+ * @param {{ llmClient, toolRegistry, ioorRecorder, db }} [invokeDeps] agentic loop 运行时依赖
  */
-function buildRouter(service) {
+function mountInvokeRoute(router, service, invokeDeps) {
+    router.post(
+        '/:id/invoke',
+        validate({ params: IdParamSchema, body: InvokeAgentSchema }),
+        asyncHandler(async (req, res) => {
+            const agent = await service.getAgentById(req.params.id);
+            const ctx = { executionId: newInvocationId(), sessionId: req.body.sessionId };
+            const result = await runAgentLoop({ agent, prompt: req.body.prompt, deps: invokeDeps, ctx });
+            res.json(success(result));
+        }),
+    );
+}
+
+function buildRouter(service, invokeDeps = {}) {
     const router = express.Router();
+
+    mountInvokeRoute(router, service, invokeDeps);
 
     router.post(
         '/',

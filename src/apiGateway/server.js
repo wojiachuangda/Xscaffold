@@ -36,6 +36,7 @@ const { buildAuditRepository } = require('../domain/audit/auditRepository');
 const { createIoorRecorder } = require('../observability/ioorRecorder');
 const { createTraceCollector } = require('../observability/traceCollector');
 const { createMetricsExporter } = require('../observability/metricsExporter');
+const { createOpenAIClient } = require('../infrastructure/llmClient/openaiClient');
 
 const { buildProjectRepository } = require('../domain/projectAssistant/repositories/projectRepository');
 const { buildTaskRepository } = require('../domain/projectAssistant/repositories/taskRepository');
@@ -62,7 +63,7 @@ function buildDependencies(overrides) {
     const agentService =
         overrides.agentService || buildService(overrides.agentRepository || buildRepository(overrides.db));
     const toolRegistry = overrides.toolRegistry || buildToolRegistry();
-    const llmClient = overrides.llmClient || stubLLMClient();
+    const llmClient = resolveLLMClient(overrides);
     const memoryStore = overrides.memoryStore || buildMemoryStore(buildMemoryRepository(overrides.db));
     const ioorRecorder = overrides.ioorRecorder || buildDefaultIoorRecorder(overrides.db);
     const traceCollector =
@@ -83,7 +84,24 @@ function buildDependencies(overrides) {
         ioorRecorder,
         traceCollector,
         metricsExporter,
+        // V2-AGENT-LOOP：暴露给 /agents/:id/invoke 的 agentic loop 运行时依赖
+        llmClient,
+        toolRegistry,
+        db: overrides.db,
     };
+}
+
+/**
+ * LLM 客户端选择：overrides 优先 → LLM_PROVIDER=openai 真接入 → 默认 stub（保测试 + 无 key 不崩）。
+ */
+function resolveLLMClient(overrides) {
+    if (overrides.llmClient) {
+        return overrides.llmClient;
+    }
+    if ((process.env.LLM_PROVIDER || 'stub') === 'openai') {
+        return createOpenAIClient();
+    }
+    return stubLLMClient();
 }
 
 /**
@@ -242,7 +260,15 @@ function mountProtectedRoutes(app, deps, overrides) {
     app.use(authMiddleware);
     app.use(rateLimit);
 
-    app.use('/agents', buildAgentRouter(deps.agentService));
+    app.use(
+        '/agents',
+        buildAgentRouter(deps.agentService, {
+            llmClient: deps.llmClient,
+            toolRegistry: deps.toolRegistry,
+            ioorRecorder: deps.ioorRecorder,
+            db: deps.db,
+        }),
+    );
     app.use('/projects', buildProjectAssistantRouter(deps.projectAssistantService));
     app.use(
         '/workflows/executions',
