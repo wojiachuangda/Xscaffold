@@ -1,9 +1,10 @@
-// [ui] ID: WEBUI-V2-TOKENS | Date: 2026-05-20 | Description: Agents view — live list from /agents (real names/models/tools); detail tasks/history/automation are mock placeholders
+// [ui] ID: WEBUI-V2-AGENT-LOOP | Date: 2026-05-20 | Description: Agents view — live /agents list + Talk to agent (POST /agents/:id/invoke agentic loop); tasks/history/automation mock
 'use strict';
 
+import { api } from '../lib/api.js';
 import { els } from '../lib/dom.js';
 import { state } from '../lib/state.js';
-import { escapeHtml, formatTime } from '../lib/utils.js';
+import { escapeHtml, formatTime, showToast } from '../lib/utils.js';
 
 const STATE_TONE = {
     enabled: { label: 'running', text: 'text-secondary', dot: 'dot-success' },
@@ -125,6 +126,7 @@ function renderDetail(agent) {
         <section class="px-6 py-6 bd-b">
             ${profileHtml(agent)}
         </section>
+        ${talkSectionHtml(agent)}
         <section class="grid grid-cols-3 gap-6 p-6 bd-b">
             <div class="card col-span-2">
                 <div class="h-8 px-4 flex items-center justify-between bd-b">
@@ -153,6 +155,100 @@ function renderDetail(agent) {
                 <ul class="divide-bd">${MOCK_AUTOMATIONS.map(automationItemHtml).join('')}</ul>
             </div>
         </section>
+    `;
+    bindTalk(agent);
+}
+
+function talkSectionHtml(agent) {
+    return `
+        <section class="px-6 py-6 bd-b">
+            <div class="card">
+                <div class="h-8 px-4 flex items-center justify-between bd-b">
+                    <span class="t-sm t-medium">Talk to agent</span>
+                    <span class="t-xs text-tertiary">${(agent.tools || []).length} tools available</span>
+                </div>
+                <div class="p-4">
+                    <textarea id="agent-prompt" class="input" rows="3" placeholder="给 agent 一句指令，它会自主调用绑定的工具完成任务…"></textarea>
+                    <div class="flex items-center gap-2 mt-3">
+                        <button id="agent-send" class="btn btn-primary focus-ring">Send</button>
+                        <span id="agent-hint" class="t-xs text-tertiary">agent 循环调用工具直到给出答复（max 8 轮）</span>
+                    </div>
+                    <div id="agent-result" class="mt-4"></div>
+                </div>
+            </div>
+        </section>
+    `;
+}
+
+function bindTalk(agent) {
+    const sendBtn = document.getElementById('agent-send');
+    const promptEl = document.getElementById('agent-prompt');
+    if (!sendBtn || !promptEl) {
+        return;
+    }
+    sendBtn.addEventListener('click', () => invokeAgent(agent, sendBtn, promptEl));
+}
+
+async function invokeAgent(agent, sendBtn, promptEl) {
+    const prompt = promptEl.value.trim();
+    if (!prompt) {
+        showToast('请输入指令');
+        return;
+    }
+    const resultEl = document.getElementById('agent-result');
+    setBusy(sendBtn, resultEl, true);
+    try {
+        const payload = await api(`/agents/${agent.id}/invoke`, { method: 'POST', body: { prompt } });
+        resultEl.innerHTML = invokeResultHtml(payload.data);
+    } catch (err) {
+        resultEl.innerHTML = `<div class="t-sm text-error">${escapeHtml(err.message || 'invoke failed')}</div>`;
+    } finally {
+        setBusy(sendBtn, resultEl, false);
+    }
+}
+
+function setBusy(sendBtn, resultEl, busy) {
+    sendBtn.disabled = busy;
+    sendBtn.textContent = busy ? 'Running…' : 'Send';
+    if (busy) {
+        resultEl.innerHTML = '<div class="t-sm text-tertiary" style="opacity:0.5">agent is thinking…</div>';
+    }
+}
+
+function invokeResultHtml(data) {
+    const turns = (data.turns || []).map(turnHtml).join('');
+    return `
+        <ol class="flex flex-col gap-2">${turns}</ol>
+        <div class="bg-soft bd rounded p-3 mt-3 t-sm">${escapeHtml(data.content || '(empty)')}</div>
+        <div class="t-xs text-tertiary mt-2">
+            stop: ${escapeHtml(data.stopReason)} · turns: ${(data.turns || []).length} · tokens: ${data.tokenUsage?.total ?? 0}
+        </div>
+    `;
+}
+
+function turnHtml(turn) {
+    if (!turn.toolCalls || turn.toolCalls.length === 0) {
+        return `
+            <li class="tl">
+                <span class="tl-dot dot-success"></span>
+                <div class="t-sm">turn ${turn.turnIndex} · final answer</div>
+            </li>
+        `;
+    }
+    const calls = turn.toolCalls
+        .map((tc, i) => {
+            const obs = turn.observations?.[i];
+            const ok = obs?.ok;
+            const detail = ok ? 'ok' : escapeHtml(obs?.error || 'failed');
+            return `<div class="t-xs ${ok ? 'text-success' : 'text-error'} t-mono">→ ${escapeHtml(tc.name)} · ${detail}</div>`;
+        })
+        .join('');
+    return `
+        <li class="tl">
+            <span class="tl-dot dot-neutral"></span>
+            <div class="t-sm">turn ${turn.turnIndex} · ${turn.toolCalls.length} tool call(s)</div>
+            <div class="mt-1 flex flex-col gap-1">${calls}</div>
+        </li>
     `;
 }
 

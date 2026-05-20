@@ -52,17 +52,22 @@ async function loadRuntimeProbes() {
 }
 
 async function loadProtectedData() {
-    if (!state.token) {
-        return;
-    }
     const [workflows, executions, agents] = await Promise.allSettled([
         api('/workflows'),
         api('/workflows/executions?limit=80'),
         api('/agents?limit=80'),
     ]);
-    state.workflows = unwrapData(workflows, [], (reason) => showToast(reason.message));
-    state.executions = unwrapData(executions, [], (reason) => showToast(reason.message));
-    state.agents = unwrapData(agents, [], (reason) => showToast(reason.message));
+    state.workflows = unwrapData(workflows, [], reportIfReal);
+    state.executions = unwrapData(executions, [], reportIfReal);
+    state.agents = unwrapData(agents, [], reportIfReal);
+}
+
+function reportIfReal(reason) {
+    const message = reason?.message || '';
+    if (message.includes('401') || message.toLowerCase().includes('unauthor')) {
+        return;
+    }
+    showToast(message);
 }
 
 async function handleSettingsSaved() {
