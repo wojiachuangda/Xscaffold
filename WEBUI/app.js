@@ -39,7 +39,27 @@ async function initialRefresh() {
 
 async function pollTick() {
     await Promise.all([loadRuntimeProbes(), loadProtectedData()]);
+    if (hasActiveFormInput()) {
+        // 用户正在 input/textarea 打字 —— 跳过 render 避免清空内容 + 失焦
+        return;
+    }
     render();
+}
+
+function hasActiveFormInput() {
+    const el = document.activeElement;
+    if (!el) {
+        return false;
+    }
+    const tag = (el.tagName || '').toLowerCase();
+    if (tag === 'textarea') {
+        return true;
+    }
+    if (tag === 'input') {
+        const type = (el.type || 'text').toLowerCase();
+        return type !== 'button' && type !== 'submit' && type !== 'checkbox' && type !== 'radio';
+    }
+    return false;
 }
 
 async function loadRuntimeProbes() {
