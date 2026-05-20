@@ -1,0 +1,14 @@
+{
+    "name": "xscaffold-webui",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Independent Xscaffold operations console",
+    "type": "commonjs",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "node server.js"
+    },
+    "engines": {
+        "node": ">=20.0.0"
+    }
+}

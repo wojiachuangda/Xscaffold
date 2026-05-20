@@ -1,0 +1,82 @@
+<!-- [ui] ID: WEBUI-MVP | Date: 2026-05-20 | Description: Xscaffold operations console shell -->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Xscaffold Console</title>
+    <link rel="stylesheet" href="./theme.css">
+    <link rel="stylesheet" href="./styles.css">
+    <script defer src="./app.js"></script>
+    <script defer src="./views.js"></script>
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="workspace-sidebar" aria-label="Workspace navigation">
+            <div class="workspace-header">
+                <div class="workspace-mark">X</div>
+                <div>
+                    <div class="workspace-name">Xscaffold</div>
+                    <div class="workspace-subtitle">Operations</div>
+                </div>
+            </div>
+            <button class="quick-action" type="button" data-view="inbox">New issue</button>
+            <nav class="nav-group">
+                <div class="nav-label">Workspace</div>
+                <button class="nav-item active" type="button" data-view="runtime">Runtimes</button>
+                <button class="nav-item" type="button" data-view="inbox">Inbox</button>
+                <button class="nav-item" type="button" data-view="executions">Executions</button>
+                <button class="nav-item" type="button" data-view="workflows">Automations</button>
+                <button class="nav-item" type="button" data-view="agents">Agents</button>
+                <button class="nav-item" type="button" data-view="assistant">Project assistant</button>
+            </nav>
+            <nav class="nav-group bottom">
+                <div class="nav-label">Configuration</div>
+                <button class="nav-item" type="button" data-view="settings">Settings</button>
+            </nav>
+        </aside>
+
+        <section class="resource-pane">
+            <header class="pane-header">
+                <div>
+                    <div id="resourceTitle" class="pane-title">Runtimes</div>
+                    <div id="resourceMeta" class="pane-meta">Backend runtime state</div>
+                </div>
+                <button id="refreshButton" class="icon-button" type="button" title="Refresh">R</button>
+            </header>
+            <div id="filterBar" class="filter-bar"></div>
+            <div id="resourceList" class="resource-list"></div>
+        </section>
+
+        <main class="detail-pane">
+            <header class="detail-header">
+                <div>
+                    <div id="detailCrumb" class="detail-crumb">Xscaffold</div>
+                    <h1 id="detailTitle">Runtime overview</h1>
+                </div>
+                <div id="detailActions" class="detail-actions"></div>
+            </header>
+            <section id="detailContent" class="detail-content"></section>
+        </main>
+    </div>
+
+    <div id="modalBackdrop" class="modal-backdrop hidden">
+        <section class="log-modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+            <header class="modal-header">
+                <div>
+                    <h2 id="modalTitle">Execution trace</h2>
+                    <div id="modalMeta" class="pane-meta">Trace and IOOR records</div>
+                </div>
+                <button id="closeModalButton" class="icon-button" type="button" title="Close">X</button>
+            </header>
+            <div class="modal-toolbar">
+                <input id="modalSearch" class="input" type="search" placeholder="Search records">
+                <button id="copyModalButton" class="secondary-button" type="button">Copy</button>
+            </div>
+            <pre id="modalLog" class="log-view"></pre>
+        </section>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
