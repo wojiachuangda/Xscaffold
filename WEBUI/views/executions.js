@@ -26,6 +26,13 @@ export async function fetchExecutions() {
 }
 
 export function renderExecutions() {
+    paint();
+    // 进入视图即拉一次分页数据：executionsTotal 仅 fetchExecutions 会设置，
+    // 否则首屏停在 0，Prev/Next 永远 disabled。
+    reloadAndRender();
+}
+
+function paint() {
     els.viewBody.innerHTML = shellHtml();
     renderList();
     bindControls();
@@ -215,5 +222,8 @@ async function reloadAndRender() {
     } catch (err) {
         showToast(err.message || 'Failed to load executions');
     }
-    renderExecutions();
+    // fetch 期间用户可能已切走视图；只在仍停留 executions 时重绘，避免盖住别的 view
+    if (state.view === 'executions') {
+        paint();
+    }
 }
