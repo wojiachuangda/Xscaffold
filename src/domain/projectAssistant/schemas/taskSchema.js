@@ -47,10 +47,22 @@ const ListTasksFilterSchema = z
     .merge(PaginationSchema)
     .strict();
 
+/**
+ * GET /projects/:id/tasks 查询：projectId 来自 URL（不在 query 中重复）
+ */
+const ProjectTasksQuerySchema = z
+    .object({
+        status: TaskStatusSchema.optional(),
+        priority: TaskPrioritySchema.optional(),
+    })
+    .merge(PaginationSchema)
+    .strict();
+
 module.exports = {
     TaskSchema,
     TaskStatusSchema,
     TaskPrioritySchema,
     UpsertTaskSchema,
     ListTasksFilterSchema,
+    ProjectTasksQuerySchema,
 };

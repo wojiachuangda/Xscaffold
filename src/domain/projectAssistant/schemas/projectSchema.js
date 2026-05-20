@@ -2,7 +2,7 @@
 'use strict';
 
 const { z } = require('zod');
-const { ProjectIdSchema, IsoDateTimeSchema } = require('./commonSchema');
+const { ProjectIdSchema, IsoDateTimeSchema, PaginationSchema } = require('./commonSchema');
 
 const ProjectStatusSchema = z.enum(['active', 'paused', 'done', 'blocked']);
 const ProjectHealthSchema = z.enum(['green', 'yellow', 'red']);
@@ -50,10 +50,25 @@ const UpdateProjectStatusSchema = z
         '至少需要提供 phase/status/health/completion/summary 之一',
     );
 
+/**
+ * GET /projects 列表过滤：status/health 可选 + 分页
+ */
+const ListProjectsFilterSchema = z
+    .object({
+        status: ProjectStatusSchema.optional(),
+        health: ProjectHealthSchema.optional(),
+    })
+    .merge(PaginationSchema)
+    .strict();
+
+const ProjectIdParamSchema = z.object({ id: ProjectIdSchema });
+
 module.exports = {
     ProjectSchema,
     ProjectStatusSchema,
     ProjectHealthSchema,
     GetProjectStatusSchema,
     UpdateProjectStatusSchema,
+    ListProjectsFilterSchema,
+    ProjectIdParamSchema,
 };

@@ -37,6 +37,13 @@ const { createIoorRecorder } = require('../observability/ioorRecorder');
 const { createTraceCollector } = require('../observability/traceCollector');
 const { createMetricsExporter } = require('../observability/metricsExporter');
 
+const { buildProjectRepository } = require('../domain/projectAssistant/repositories/projectRepository');
+const { buildTaskRepository } = require('../domain/projectAssistant/repositories/taskRepository');
+const { buildEventRepository } = require('../domain/projectAssistant/repositories/eventRepository');
+const { buildReminderRepository } = require('../domain/projectAssistant/repositories/reminderRepository');
+const { buildProjectAssistantService } = require('../domain/projectAssistant/projectAssistantService');
+const { buildProjectAssistantRouter } = require('../domain/projectAssistant/projectAssistantController');
+
 function createApp(overrides = {}) {
     const app = express();
     app.disable('x-powered-by');
@@ -63,8 +70,10 @@ function buildDependencies(overrides) {
     const metricsExporter = overrides.metricsExporter || createMetricsExporter();
     const nodeRunner =
         overrides.nodeRunner || createNodeRunner({ toolRegistry, agentService, llmClient, memoryStore, ioorRecorder });
+    const projectAssistantService = overrides.projectAssistantService || buildDefaultPaService(overrides);
     return {
         agentService,
+        projectAssistantService,
         workflowRegistry: overrides.workflowRegistry || buildWorkflowRegistryWithAutoload(overrides),
         executionStore: overrides.executionStore || buildExecutionStore(overrides.db),
         queue: overrides.queue || createQueue(parseQueueConfig()),
@@ -75,6 +84,18 @@ function buildDependencies(overrides) {
         traceCollector,
         metricsExporter,
     };
+}
+
+/**
+ * Project Assistant 服务装配：4 个 repo 默认走 overrides.db；任一 repo 也可独立 override。
+ */
+function buildDefaultPaService(overrides) {
+    return buildProjectAssistantService({
+        projectRepository: overrides.projectRepository || buildProjectRepository(overrides.db),
+        taskRepository: overrides.taskRepository || buildTaskRepository(overrides.db),
+        eventRepository: overrides.eventRepository || buildEventRepository(overrides.db),
+        reminderRepository: overrides.reminderRepository || buildReminderRepository(overrides.db),
+    });
 }
 
 function buildDefaultIoorRecorder(db) {
@@ -222,6 +243,7 @@ function mountProtectedRoutes(app, deps, overrides) {
     app.use(rateLimit);
 
     app.use('/agents', buildAgentRouter(deps.agentService));
+    app.use('/projects', buildProjectAssistantRouter(deps.projectAssistantService));
     app.use(
         '/workflows/executions',
         buildExecutionTraceRouter({

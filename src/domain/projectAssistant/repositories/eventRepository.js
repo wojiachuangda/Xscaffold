@@ -57,12 +57,27 @@ async function listRecent(driver, projectId, limit) {
     return rows.map(rowToEntity);
 }
 
+async function listByProject(driver, projectId, page = {}) {
+    const limit = page.limit ?? 50;
+    const offset = page.offset ?? 0;
+    const rowsResult = await driver.query(
+        'SELECT * FROM pa_events WHERE project_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+        [projectId, limit, offset],
+    );
+    const countResult = await driver.query('SELECT COUNT(*) AS c FROM pa_events WHERE project_id = ?', [projectId]);
+    return {
+        items: rowsResult.rows.map(rowToEntity),
+        total: Number(countResult.rows[0]?.c || 0),
+    };
+}
+
 function buildEventRepository(driverOrUndefined) {
     const driver = driverOrUndefined || getDb();
     return {
         insert: (input) => insert(driver, input),
         findById: (eventId) => findById(driver, eventId),
         listRecent: (projectId, limit) => listRecent(driver, projectId, limit),
+        listByProject: (projectId, page) => listByProject(driver, projectId, page),
     };
 }
 

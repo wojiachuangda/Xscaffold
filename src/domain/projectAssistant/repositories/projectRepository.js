@@ -77,11 +77,44 @@ async function upsertStatus(driver, projectId, patch) {
     return getByProjectId(driver, projectId);
 }
 
+function buildListAllWhere(filter) {
+    const clauses = [];
+    const params = [];
+    if (filter.status) {
+        clauses.push('status = ?');
+        params.push(filter.status);
+    }
+    if (filter.health) {
+        clauses.push('health = ?');
+        params.push(filter.health);
+    }
+    return {
+        whereSql: clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '',
+        params,
+    };
+}
+
+async function listAll(driver, filter = {}) {
+    const { whereSql, params } = buildListAllWhere(filter);
+    const limit = filter.limit ?? 50;
+    const offset = filter.offset ?? 0;
+    const rowsResult = await driver.query(
+        `SELECT * FROM projects${whereSql} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
+        [...params, limit, offset],
+    );
+    const countResult = await driver.query(`SELECT COUNT(*) AS c FROM projects${whereSql}`, params);
+    return {
+        items: rowsResult.rows.map(rowToEntity),
+        total: Number(countResult.rows[0]?.c || 0),
+    };
+}
+
 function buildProjectRepository(driverOrUndefined) {
     const driver = driverOrUndefined || getDb();
     return {
         getByProjectId: (projectId) => getByProjectId(driver, projectId),
         upsertStatus: (projectId, patch) => upsertStatus(driver, projectId, patch),
+        listAll: (filter) => listAll(driver, filter),
     };
 }
 

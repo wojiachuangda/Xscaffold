@@ -46,10 +46,21 @@ const ListDueRemindersSchema = z
     .merge(PaginationSchema)
     .strict();
 
+/**
+ * GET /projects/:id/reminders 查询：projectId 来自 URL；before 可选（默认服务端填 now + 7d）
+ */
+const ListProjectRemindersQuerySchema = z
+    .object({
+        before: IsoDateTimeSchema.optional(),
+    })
+    .merge(PaginationSchema)
+    .strict();
+
 module.exports = {
     ReminderSchema,
     ReminderSeveritySchema,
     ReminderStatusSchema,
     CreateReminderSchema,
     ListDueRemindersSchema,
+    ListProjectRemindersQuerySchema,
 };

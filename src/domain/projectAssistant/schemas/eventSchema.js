@@ -2,7 +2,7 @@
 'use strict';
 
 const { z } = require('zod');
-const { ProjectIdSchema, IsoDateTimeSchema, EVENT_TYPE_REGEX } = require('./commonSchema');
+const { ProjectIdSchema, IsoDateTimeSchema, EVENT_TYPE_REGEX, PaginationSchema } = require('./commonSchema');
 
 const EventSeveritySchema = z.enum(['low', 'normal', 'high', 'critical']);
 
@@ -38,9 +38,15 @@ const RecordEventSchema = z
     })
     .strict();
 
+/**
+ * GET /projects/:id/events 查询：仅分页（projectId 来自 URL）
+ */
+const EventPageQuerySchema = z.object({}).merge(PaginationSchema).strict();
+
 module.exports = {
     EventSchema,
     EventSeveritySchema,
     EventTypeSchema,
     RecordEventSchema,
+    EventPageQuerySchema,
 };
