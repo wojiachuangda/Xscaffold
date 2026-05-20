@@ -133,4 +133,40 @@ describe('agentRunner.runAgentLoop', () => {
         expect(result.content).toBe('plain reply');
         expect(result.turns).toHaveLength(1);
     });
+
+    test('LLM 返回 reasoning_content → 下一轮 assistant turn 透传（DeepSeek 协议）', async () => {
+        const calls = [];
+        const responses = [
+            {
+                content: null,
+                reasoning_content: '<think>I should call echo first.</think>',
+                toolCalls: [{ id: 'c1', name: 'echo', arguments: { msg: 'hi' } }],
+            },
+            { content: 'done', toolCalls: [] },
+        ];
+        const client = {
+            chat: (args) => {
+                calls.push(args);
+                const next = responses[calls.length - 1] || { content: 'fallback', toolCalls: [] };
+                return Promise.resolve({
+                    content: next.content ?? null,
+                    reasoning_content: next.reasoning_content ?? null,
+                    toolCalls: next.toolCalls || [],
+                    tokenUsage: { prompt: 1, completion: 1, total: 2, cached_prompt_tokens: 0 },
+                    latencyMs: 1,
+                });
+            },
+        };
+        await runAgentLoop({
+            agent: AGENT,
+            prompt: 'go',
+            deps: { llmClient: client, toolRegistry: buildRegistry() },
+        });
+
+        expect(calls).toHaveLength(2);
+        const secondMessages = calls[1].messages;
+        const assistantTurn = secondMessages.find((m) => m.role === 'assistant');
+        expect(assistantTurn).toBeDefined();
+        expect(assistantTurn.reasoning_content).toBe('<think>I should call echo first.</think>');
+    });
 });

@@ -67,7 +67,7 @@ function systemMessage(agent) {
 }
 
 function assistantToolCallMessage(result) {
-    return {
+    const msg = {
         role: 'assistant',
         content: result.content || null,
         tool_calls: (result.toolCalls || []).map((tc) => ({
@@ -76,6 +76,12 @@ function assistantToolCallMessage(result) {
             function: { name: tc.name, arguments: JSON.stringify(tc.arguments ?? {}) },
         })),
     };
+    // DeepSeek / reasoning model 协议：返回的 reasoning_content 必须在下一轮 assistant turn 中透传回去。
+    // OpenAI 官方端点不存在此字段，仅在有值时附加，不影响兼容性。
+    if (result.reasoning_content) {
+        msg.reasoning_content = result.reasoning_content;
+    }
+    return msg;
 }
 
 async function executeCalls(calls, allowed, deps, messages) {
