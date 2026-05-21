@@ -1,9 +1,11 @@
 // [refactor] ID: V1.5-PINO-ASYNC | Date: 2026-05-20 | Description: Pino logger（双脱敏管道：redact.paths 主线程序列化阶段 + V1.5 worker thread async transport 让日志 I/O 离开热路径）
 'use strict';
 
+const { Writable } = require('stream');
 const pino = require('pino');
 const { redactSensitive, SENSITIVE_KEY_PATTERN } = require('./redact');
 const { LoggerConfigSchema } = require('./schemas/loggerConfigSchema');
+const logRingBuffer = require('./logRingBuffer');
 
 const REDACT_PATHS = [
     'password',
@@ -84,20 +86,54 @@ function createLogger(overrides = {}) {
     const prettyMode = resolvePrettyMode(config.pretty, env);
     const transportMode = resolveTransportMode(config.transport, env);
     const options = buildBaseOptions(config.level);
+    // primary（stdout/pretty/worker）与 ring buffer 同挂 multistream：
+    // V1.8 worker transport 保留（仍走 pino.transport），额外多一路喂 Live Logs 环形缓冲（主线程，供 /logs 读）。
+    const streams = [{ stream: createPrimaryStream(prettyMode, transportMode) }, { stream: createRingStream() }];
+    return pino(options, pino.multistream(streams));
+}
 
+function createPrimaryStream(prettyMode, transportMode) {
     if (prettyMode === 'on') {
-        options.transport = {
-            target: 'pino-pretty',
-            options: { colorize: true, singleLine: false, translateTime: 'SYS:HH:MM:ss.l' },
-        };
-        return pino(options);
+        // eslint-disable-next-line global-require
+        return require('pino-pretty')({ colorize: true, singleLine: false, translateTime: 'SYS:HH:MM:ss.l' });
     }
     if (transportMode === 'worker') {
         // pino/file destination:1 = stdout fd；sync:false 启用 worker thread 异步写入
-        const transport = pino.transport({ target: 'pino/file', options: { destination: 1, sync: false } });
-        return pino(options, transport);
+        return pino.transport({ target: 'pino/file', options: { destination: 1, sync: false } });
     }
-    return pino(options);
+    return pino.destination(1);
+}
+
+// ring 流：multistream 把序列化后的 JSON 同样写一份过来 → 解析后入环形缓冲（已 redact 脱敏）。
+function createRingStream() {
+    return new Writable({
+        write(chunk, _enc, cb) {
+            ingestLogChunk(chunk.toString());
+            cb();
+        },
+    });
+}
+
+function ingestLogChunk(text) {
+    for (const line of text.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed) {
+            ingestLogLine(trimmed);
+        }
+    }
+}
+
+function ingestLogLine(line) {
+    try {
+        const record = JSON.parse(line);
+        logRingBuffer.push({
+            ts: record.time || new Date().toISOString(),
+            level: record.level || 'info',
+            msg: record.msg || '',
+        });
+    } catch (_err) {
+        /* 非 JSON 行（multistream 收到的本应是序列化 JSON）忽略 */
+    }
 }
 
 const logger = createLogger();

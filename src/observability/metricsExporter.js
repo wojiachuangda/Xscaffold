@@ -19,6 +19,28 @@ function createMetricsExporter() {
         incrNodeExecution: (type, status) => incrCounter(state.nodesExecution, `${type}|${status}`),
         render: () => renderPrometheus(state),
         snapshot: () => snapshot(state),
+        summary: () => buildSummary(state),
+    };
+}
+
+function sumValues(map) {
+    let total = 0;
+    for (const value of map.values()) {
+        total += value;
+    }
+    return total;
+}
+
+// 聚合给 runtime 视图 Engine Activity 用的 JSON（避免前端解析 Prometheus 文本）
+function buildSummary(state) {
+    const workflowRuns = sumValues(state.workflowDuration.counts);
+    const durationSum = sumValues(state.workflowDuration.sums);
+    return {
+        nodesExecuted: sumValues(state.nodesExecution),
+        toolCalls: sumValues(state.toolCalls),
+        llmTokens: sumValues(state.llmTokens),
+        workflowRuns,
+        workflowDurationAvgMs: workflowRuns > 0 ? Math.round(durationSum / workflowRuns) : 0,
     };
 }
 

@@ -19,6 +19,7 @@ const { buildRepository } = require('../agentManager/agentRepository');
 const { buildWorkflowRouter } = require('./controllers/workflowController');
 const { buildWebhookRouter } = require('./controllers/webhookController');
 const { buildExecutionTraceRouter, buildMetricsRouter } = require('./controllers/observabilityController');
+const { buildRuntimeRouter } = require('./controllers/runtimeController');
 
 const { parseQueueConfig, createQueue } = require('../infrastructure/queue');
 const { createWorkflowRegistry, loadFromDirectorySync } = require('../workflowEngine/workflowRegistry');
@@ -273,6 +274,7 @@ function mountProtectedRoutes(app, deps, overrides) {
         }),
     );
     app.use('/projects', buildProjectAssistantRouter(deps.projectAssistantService));
+    app.use('/runtime', buildRuntimeRouter({ metricsExporter: deps.metricsExporter }));
     app.use(
         '/workflows/executions',
         buildExecutionTraceRouter({
