@@ -7,6 +7,7 @@ const VIEW_WHITELIST = new Set([
     'runtime',
     'agents',
     'sessions',
+    'projects',
     'automation',
     'inbox',
     'executions',

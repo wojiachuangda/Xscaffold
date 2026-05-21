@@ -7,6 +7,7 @@ import { renderAssistant } from './assistant.js';
 import { renderAutomation } from './automation.js';
 import { renderExecutions } from './executions.js';
 import { renderInbox } from './inbox.js';
+import { renderProjects } from './projects/index.js';
 import { renderRuntime } from './runtime.js';
 import { renderSessions } from './sessions/index.js';
 import { renderSettings } from './settings.js';
@@ -15,6 +16,7 @@ const RENDERERS = {
     runtime: renderRuntime,
     agents: renderAgents,
     sessions: renderSessions,
+    projects: renderProjects,
     automation: renderAutomation,
     inbox: renderInbox,
     executions: renderExecutions,
