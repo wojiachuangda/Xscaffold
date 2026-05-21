@@ -8,6 +8,7 @@ const express = require('express');
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
 const { createAuthMiddleware } = require('./middlewares/authMiddleware');
 const { createApiKeyMiddleware } = require('./middlewares/apiKeyMiddleware');
+const { createCorsMiddleware } = require('./middlewares/corsMiddleware');
 const { createRateLimiter } = require('./middlewares/rateLimiter');
 const { success } = require('./response/envelope');
 const { logger } = require('../observability/logger');
@@ -57,6 +58,8 @@ function createApp(overrides = {}) {
     const deps = buildDependencies(overrides);
     // 暴露依赖到 app.locals.deps —— main.js 优雅停机时需要 await deps.queue.close()
     app.locals.deps = deps;
+    // CORS 必须在所有路由之前：预检 OPTIONS 要在 JSON body parser / 鉴权之前 204 短路
+    app.use(overrides.corsMiddleware || createCorsMiddleware({ allowedOrigins: overrides.corsAllowedOrigins }));
     mountHealthAndWebhooks(app, deps, overrides);
     mountMetricsEndpoint(app, deps, overrides);
     mountProtectedRoutes(app, deps, overrides);
