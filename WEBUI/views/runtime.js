@@ -1,110 +1,105 @@
-// [ui] ID: WEBUI-V2-TOKENS | Date: 2026-05-20 | Description: Runtime view — token-styled list + detail; live probes from /healthz /readyz; per-runtime metrics/health/logs are mock placeholders
+// [ui] ID: WEBUI-V2.3-RUNTIME | Date: 2026-05-21 | Description: Runtime 单页健康面板——Status(/healthz+/readyz) + Engine(/runtime/metrics) + Health + Live Logs(/runtime/logs/stream SSE)；自管刷新 + 离开自清理
 'use strict';
 
+import { api } from '../lib/api.js';
 import { els } from '../lib/dom.js';
 import { state } from '../lib/state.js';
+import { streamSse } from '../lib/sseClient.js';
 import { escapeHtml } from '../lib/utils.js';
 
-const RUNTIMES = [
-    { id: 'rt_8f3a', name: 'ingest-worker-eu-1', region: 'eu-west-1', state: 'running', meta: '14d · eu-west-1', dot: 'dot-success' },
-    { id: 'rt_b21c', name: 'vision-encoder-v3', region: 'us-east-1', state: 'running', meta: '2d 11h · us-east-1', dot: 'dot-success' },
-    { id: 'rt_45e0', name: 'analytics-realtime', region: 'eu-west-1', state: 'idle', meta: '3h idle · eu-west-1', dot: 'dot-neutral' },
-    { id: 'rt_9a01', name: 'archival-batch', region: 'us-east-1', state: 'stopped', meta: 'stopped 2d ago', dot: 'dot-neutral' },
-];
+const REFRESH_MS = 5000;
+const MAX_LOG_DOM = 500;
+const LEVEL_CLS = { info: 'term-info', warn: 'term-warn', error: 'term-err', fatal: 'term-err', debug: 'term-mute', trace: 'term-mute' };
+const LEVEL_LBL = { info: 'INFO', warn: 'WARN', error: 'ERR ', fatal: 'FATL', debug: 'DBG ', trace: 'TRC ' };
 
-const STATE_TEXT = { running: 'text-secondary', idle: 'text-tertiary', stopped: 'text-tertiary' };
-
-const HEALTH = [
-    { svc: 'http-api', lat: '12ms', state: 'healthy' },
-    { svc: 'postgres-primary', lat: '4ms', state: 'healthy' },
-    { svc: 'redis-stream', lat: '1ms', state: 'healthy' },
-    { svc: 'object-store', lat: '48ms', state: 'degraded' },
-    { svc: 'auth-broker', lat: '9ms', state: 'healthy' },
-    { svc: 'metrics-pushgateway', lat: '18ms', state: 'healthy' },
-];
-
-const HEALTH_TONE = {
-    healthy: { dot: 'dot-success', label: 'text-success' },
-    degraded: { dot: 'dot-warning', label: 'text-warning' },
-    down: { dot: 'dot-error', label: 'text-error' },
-};
-
-const LOGS = [
-    ['14:02:11.842', 'i', '[ingestor] consumed batch=512 lag=8ms partition=p-4'],
-    ['14:02:11.901', 'm', '[ingestor] checkpoint committed offset=8821044'],
-    ['14:02:12.014', 'i', '[encoder] fanout to 3 workers · workload=0.37'],
-    ['14:02:12.220', 's', '[scheduler] task t_91ab completed in 1.84s'],
-    ['14:02:12.412', 'm', '[gc] young 18.2ms · old 0ms · heap 1.42G'],
-    ['14:02:12.901', 'i', '[ingestor] consumed batch=487 lag=11ms partition=p-2'],
-    ['14:02:13.020', 'w', '[object-store] elevated p99 latency 48ms (>20ms threshold)'],
-    ['14:02:13.117', 'm', '[heartbeat] pulse n=128 jitter=±2.1ms'],
-    ['14:02:13.244', 'i', '[encoder] vector cache hit-rate 0.94'],
-    ['14:02:13.581', 's', '[scheduler] task t_91ac completed in 0.92s'],
-    ['14:02:13.802', 'i', '[ingestor] consumed batch=503 lag=9ms partition=p-1'],
-    ['14:02:14.014', 'm', '[gc] young 14.1ms · old 0ms · heap 1.43G'],
-];
-
-const LOG_CLS = { i: 'term-info', w: 'term-warn', e: 'term-err', s: 'term-ok', m: 'term-mute' };
-const LOG_LBL = { i: 'INFO', w: 'WARN', e: 'ERR ', s: 'OK  ', m: '    ' };
-const SPARK = [3, 5, 4, 6, 7, 5, 8, 6, 9, 7, 8, 6, 7, 9, 8, 7];
-
-let selectedIndex = 0;
+let logsAbort = null;
+let refreshTimer = null;
+let paused = false;
 
 export function renderRuntime() {
-    const target = RUNTIMES.findIndex((r) => r.id === state.selectedId);
-    if (target >= 0) {
-        selectedIndex = target;
-    }
+    cleanup();
+    paused = false;
     els.viewBody.innerHTML = shellHtml();
-    renderList();
-    renderDetail();
+    bindPause();
+    updateStatus();
+    updateMetrics();
+    startLogStream();
+    refreshTimer = setInterval(tick, REFRESH_MS);
+}
+
+function tick() {
+    if (state.view !== 'runtime') {
+        cleanup(); // 离开 runtime → 5s 内自清理 SSE + 定时器
+        return;
+    }
+    updateStatus();
+    updateMetrics();
+}
+
+function cleanup() {
+    if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+    }
+    if (logsAbort) {
+        logsAbort.abort();
+        logsAbort = null;
+    }
 }
 
 function shellHtml() {
     return `
-        <aside class="w-list bg-panel bd-r flex flex-col shrink-0">
-            <div class="h-12 px-4 flex items-center justify-between bd-b">
-                <span class="t-base">Runtimes</span>
-                <button class="btn btn-ghost btn-icon focus-ring" title="New runtime"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
-            </div>
-            <div class="px-4 pt-3 pb-1 t-xs t-upper t-medium text-tertiary">Active · ${RUNTIMES.filter((r) => r.state === 'running').length}</div>
-            <ul id="rt-list" class="flex-1 overflow-y-auto scroll-thin"></ul>
-            <div class="px-4 py-2 bd-t t-xs text-tertiary flex items-center gap-2">
-                <span class="dot ${probeDotClass()}"></span>
-                <span>${probeSummary()}</span>
-            </div>
-        </aside>
         <main class="flex-1 overflow-hidden flex flex-col">
             <header class="h-12 px-6 flex items-center justify-between bd-b bg-panel shrink-0">
-                <div class="flex items-center gap-3 min-w-0" id="rt-header"></div>
-                <div class="flex items-center gap-2">
-                    <button class="btn btn-secondary focus-ring">Restart</button>
-                    <button class="btn btn-danger focus-ring">Stop</button>
+                <div class="flex items-center gap-4 min-w-0">
+                    <h1 class="t-base">Runtime</h1>
+                    <span class="flex items-center gap-2">
+                        <span id="rt-status-dot" class="dot dot-neutral"></span>
+                        <span id="rt-status-text" class="t-sm text-secondary">…</span>
+                    </span>
                 </div>
+                <span id="rt-uptime" class="t-xs text-tertiary t-mono">uptime —</span>
             </header>
             <div class="flex-1 overflow-y-auto scroll-thin">
-                <section class="grid grid-cols-4 gap-px bg-line bd-b">
-                    ${metricsHtml()}
-                </section>
-                <section class="grid grid-cols-5 gap-6 p-6">
-                    <div class="card col-span-2">
-                        <div class="h-8 px-4 flex items-center justify-between bd-b">
-                            <div class="flex items-center gap-2">
-                                <span class="t-sm t-medium">Health Checks</span>
-                                <span class="t-xs text-tertiary">·</span>
-                                <span class="t-xs text-secondary">${HEALTH.length} services</span>
-                            </div>
-                            <span class="t-xs text-secondary">${HEALTH.filter((h) => h.state === 'healthy').length} healthy · ${HEALTH.filter((h) => h.state !== 'healthy').length} degraded</span>
-                        </div>
-                        <ul id="rt-health" class="divide-bd"></ul>
+                <section class="px-6 pt-6">
+                    <div class="grid grid-cols-4 gap-4">
+                        ${valCard('Uptime', '<span id="rt-uptime-val" class="t-lg t-num">—</span>', 'process uptime')}
+                        ${dotCard('Process', 'rt-proc', 'healthz · readyz')}
+                        ${dotCard('Database', 'rt-db', 'readiness probe')}
+                        ${dotCard('Queue', 'rt-q', 'readiness probe')}
                     </div>
-                    <div class="card col-span-3 flex flex-col">
+                </section>
+                <section class="px-6 pt-6">
+                    <div class="flex items-baseline justify-between mb-3">
+                        <h2 class="t-sm t-medium">Engine Activity</h2>
+                        <span class="t-xs text-tertiary">since process start</span>
+                    </div>
+                    <div class="grid grid-cols-4 gap-4">
+                        ${numCard('Nodes executed', 'rt-nodes')}
+                        ${numCard('Tool calls', 'rt-tools')}
+                        ${numCard('LLM tokens', 'rt-tokens')}
+                        ${numCard('Workflow duration avg', 'rt-wfdur')}
+                    </div>
+                </section>
+                <section class="px-6 pt-6">
+                    <div class="flex items-baseline justify-between mb-3">
+                        <h2 class="t-sm t-medium">Health Checks</h2>
+                        <span class="t-xs text-tertiary">readiness probes</span>
+                    </div>
+                    <div class="card"><ul class="divide-bd">
+                        ${healthRow('Database', 'sqlite', 'rt-health-db')}
+                        ${healthRow('Job Queue', 'in-memory', 'rt-health-q')}
+                    </ul></div>
+                </section>
+                <section class="px-6 py-6">
+                    <div class="flex items-baseline justify-between mb-3">
+                        <h2 class="t-sm t-medium">Live Logs</h2>
+                        <span class="t-xs text-tertiary">ring buffer · 实时 SSE</span>
+                    </div>
+                    <div class="card flex flex-col">
                         <div class="h-8 px-4 flex items-center justify-between bd-b shrink-0">
-                            <div class="flex items-center gap-2">
-                                <span class="t-sm t-medium">Live Logs</span>
-                                <span class="dot dot-success ml-1"></span>
-                                <span class="t-xs text-secondary">mock stream</span>
-                            </div>
+                            <div class="flex items-center gap-2"><span class="dot dot-success"></span><span class="t-xs text-secondary">streaming</span></div>
+                            <button id="rt-log-pause" class="tab focus-ring">Pause</button>
                         </div>
                         <pre id="rt-log" class="term flex-1 px-4 py-3 overflow-y-auto scroll-thin m-0 max-h-list"></pre>
                     </div>
@@ -114,114 +109,148 @@ function shellHtml() {
     `;
 }
 
-function probeDotClass() {
-    return state.runtime.ready?.status === 'ready' ? 'dot-success' : 'dot-warning';
+function valCard(label, valHtml, hint) {
+    return `<div class="card p-4"><div class="t-xs t-upper t-medium text-tertiary mb-2">${label}</div>${valHtml}<div class="t-xs text-secondary mt-1">${hint}</div></div>`;
 }
 
-function probeSummary() {
-    const health = state.runtime.health?.status || 'unknown';
-    const ready = state.runtime.ready?.status || 'unknown';
-    return `live probes · health=${health} · ready=${ready}`;
+function dotCard(label, idPrefix, hint) {
+    return `<div class="card p-4"><div class="t-xs t-upper t-medium text-tertiary mb-2">${label}</div><div class="flex items-center gap-2"><span id="${idPrefix}-dot" class="dot dot-neutral"></span><span id="${idPrefix}-text" class="t-lg">…</span></div><div class="t-xs text-secondary mt-1">${hint}</div></div>`;
 }
 
-function renderList() {
-    const ul = document.getElementById('rt-list');
-    ul.innerHTML = RUNTIMES.map((r, i) => `
-        <li class="row cursor-pointer focus-ring ${i === selectedIndex ? 'row-sel' : ''}" data-index="${i}" tabindex="0">
-            <div class="flex items-center gap-3 min-w-0">
-                <span class="dot ${r.dot} shrink-0"></span>
-                <span class="t-sm t-medium t-truncate">${escapeHtml(r.name)}</span>
-            </div>
-            <div class="flex items-center justify-between mt-1 pl-4">
-                <span class="t-xs text-secondary t-truncate">${escapeHtml(r.meta)}</span>
-                <span class="t-xs t-medium ${STATE_TEXT[r.state]}">${r.state}</span>
-            </div>
-        </li>
-    `).join('');
-    ul.querySelectorAll('li').forEach((li) => {
-        li.addEventListener('click', () => {
-            selectedIndex = Number(li.dataset.index);
-            state.selectedId = RUNTIMES[selectedIndex].id;
-            renderDetail();
-            ul.querySelectorAll('li').forEach((n, k) => n.classList.toggle('row-sel', k === selectedIndex));
-        });
+function numCard(label, id) {
+    return `<div class="card p-4"><div class="t-xs t-upper t-medium text-tertiary mb-2">${label}</div><div id="${id}" class="t-lg t-num t-mono">—</div></div>`;
+}
+
+function healthRow(name, kind, idPrefix) {
+    return `<li class="px-4 py-3 flex items-center justify-between"><div class="flex items-center gap-3"><span id="${idPrefix}-dot" class="dot dot-neutral"></span><span class="t-sm">${name}</span><span class="t-xs text-tertiary">${kind}</span></div><div class="flex items-center gap-6"><span class="t-xs text-tertiary">latency</span><span class="t-xs t-mono text-secondary w-16 text-right">—</span><span id="${idPrefix}-text" class="t-xs t-medium w-16 text-right text-tertiary">…</span></div></li>`;
+}
+
+function updateStatus() {
+    const health = state.runtime?.health;
+    const ready = state.runtime?.ready;
+    const dbReady = ready?.checks?.db === true;
+    const qReady = ready?.checks?.queue === true;
+    const healthy = Boolean(health) && Boolean(ready) && ready.status === 'ready';
+    const uptime = health?.uptime;
+    setText('rt-uptime', uptime == null ? 'uptime —' : `uptime ${formatUptime(uptime)}`);
+    setText('rt-uptime-val', uptime == null ? '—' : formatUptime(uptime));
+    setDot('rt-status-dot', healthy ? 'dot-success' : (health ? 'dot-warning' : 'dot-error'));
+    setText('rt-status-text', healthy ? 'Healthy' : (health ? 'Degraded' : 'Down'));
+    setDot('rt-proc-dot', health ? 'dot-success' : 'dot-error');
+    setText('rt-proc-text', health ? 'Healthy' : 'Down');
+    setReadyState('rt-db', dbReady);
+    setReadyState('rt-q', qReady);
+    setHealthRow('rt-health-db', dbReady);
+    setHealthRow('rt-health-q', qReady);
+}
+
+function setReadyState(idPrefix, ok) {
+    setDot(`${idPrefix}-dot`, ok ? 'dot-success' : 'dot-error');
+    setText(`${idPrefix}-text`, ok ? 'Ready' : 'Not ready');
+}
+
+function setHealthRow(idPrefix, ok) {
+    setDot(`${idPrefix}-dot`, ok ? 'dot-success' : 'dot-error');
+    const el = document.getElementById(`${idPrefix}-text`);
+    if (el) {
+        el.textContent = ok ? 'ready' : 'not ready';
+        el.className = `t-xs t-medium w-16 text-right ${ok ? 'text-success' : 'text-error'}`;
+    }
+}
+
+async function updateMetrics() {
+    let metrics;
+    try {
+        metrics = (await api('/runtime/metrics')).data;
+    } catch (_err) {
+        return; // 保留上次值
+    }
+    if (state.view !== 'runtime' || !metrics) {
+        return;
+    }
+    setText('rt-nodes', fmtNum(metrics.nodesExecuted));
+    setText('rt-tools', fmtNum(metrics.toolCalls));
+    setText('rt-tokens', fmtNum(metrics.llmTokens));
+    setText('rt-wfdur', `${fmtNum(metrics.workflowDurationAvgMs)} ms`);
+}
+
+function startLogStream() {
+    const controller = new AbortController();
+    logsAbort = controller;
+    streamSse('/runtime/logs/stream', {
+        method: 'GET',
+        signal: controller.signal,
+        handlers: { onLog: appendLog },
+    }).catch(() => {
+        /* abort / 网络结束 —— 忽略 */
     });
 }
 
-function renderDetail() {
-    const r = RUNTIMES[selectedIndex];
-    document.getElementById('rt-header').innerHTML = `
-        <span class="dot ${r.dot}"></span>
-        <h1 class="t-base t-truncate">${escapeHtml(r.name)}</h1>
-        <span class="t-xs t-medium ${STATE_TEXT[r.state]}">${r.state}</span>
-        <span class="t-xs text-tertiary">·</span>
-        <span class="t-xs text-secondary t-mono">${escapeHtml(r.id)}</span>
-    `;
-    renderHealth();
-    renderSpark();
-    renderLogs();
-}
-
-function metricsHtml() {
-    return `
-        <div class="bg-panel px-6 py-4">
-            <div class="t-xs t-upper t-medium text-tertiary mb-1">Uptime</div>
-            <div class="t-base t-num">14d 06h</div>
-            <div class="t-xs text-secondary mt-1">mock · since 2026-05-06</div>
-        </div>
-        <div class="bg-panel px-6 py-4">
-            <div class="t-xs t-upper t-medium text-tertiary mb-1">Heartbeat</div>
-            <div class="t-base t-num">128 <span class="t-xs text-tertiary font-normal">/min</span></div>
-            <div class="flex items-end gap-1 mt-2 h-6" id="rt-spark"></div>
-        </div>
-        <div class="bg-panel px-6 py-4">
-            <div class="t-xs t-upper t-medium text-tertiary mb-1">Workload</div>
-            <div class="t-base t-num">37<span class="t-xs text-tertiary font-normal">%</span></div>
-            <div class="bar mt-2"><div class="bar-fill" style="width:37%"></div></div>
-        </div>
-        <div class="bg-panel px-6 py-4">
-            <div class="t-xs t-upper t-medium text-tertiary mb-1">Memory</div>
-            <div class="t-base t-num">1.42 <span class="t-xs text-tertiary font-normal">/ 4 GB</span></div>
-            <div class="bar mt-2"><div class="bar-fill bar-fill--secondary" style="width:35.5%"></div></div>
-        </div>
-    `;
-}
-
-function renderHealth() {
-    const ul = document.getElementById('rt-health');
-    ul.innerHTML = HEALTH.map((h) => {
-        const tone = HEALTH_TONE[h.state];
-        return `
-            <li class="px-4 py-3 flex items-center justify-between hover:bg-hover">
-                <div class="flex items-center gap-3 min-w-0">
-                    <span class="dot ${tone.dot}"></span>
-                    <span class="t-sm t-truncate">${escapeHtml(h.svc)}</span>
-                </div>
-                <div class="flex items-center gap-4">
-                    <span class="t-xs t-mono text-secondary">${h.lat}</span>
-                    <span class="t-xs t-medium w-16 text-right ${tone.label}">${h.state}</span>
-                </div>
-            </li>
-        `;
-    }).join('');
-}
-
-function renderSpark() {
-    const w = document.getElementById('rt-spark');
-    w.innerHTML = '';
-    const max = Math.max(...SPARK);
-    SPARK.forEach((v) => {
-        const b = document.createElement('div');
-        b.className = 'w-1 rounded-sm bg-n400';
-        b.style.height = `${(v / max) * 100}%`;
-        w.appendChild(b);
-    });
-}
-
-function renderLogs() {
+function appendLog(entry) {
+    if (state.view !== 'runtime') {
+        return;
+    }
     const pre = document.getElementById('rt-log');
-    pre.innerHTML = LOGS.map(([t, c, msg]) =>
-        `<span class="term-time">${t}</span> <span class="${LOG_CLS[c]}">${LOG_LBL[c]}</span> <span class="${LOG_CLS[c]}">${escapeHtml(msg)}</span>`,
-    ).join('\n');
-    pre.scrollTop = pre.scrollHeight;
+    if (!pre) {
+        return;
+    }
+    const cls = LEVEL_CLS[entry.level] || 'term-mute';
+    const lbl = LEVEL_LBL[entry.level] || '    ';
+    const line = document.createElement('div');
+    line.innerHTML = `<span class="term-time">${escapeHtml(logTime(entry.ts))}</span> <span class="${cls}">${lbl}</span> <span class="${cls}">${escapeHtml(entry.msg || '')}</span>`;
+    pre.appendChild(line);
+    while (pre.childElementCount > MAX_LOG_DOM) {
+        pre.removeChild(pre.firstChild);
+    }
+    if (!paused) {
+        pre.scrollTop = pre.scrollHeight;
+    }
+}
+
+function bindPause() {
+    const btn = document.getElementById('rt-log-pause');
+    btn?.addEventListener('click', () => {
+        paused = !paused;
+        btn.textContent = paused ? 'Resume' : 'Pause';
+        btn.classList.toggle('is-active', paused);
+        if (!paused) {
+            const pre = document.getElementById('rt-log');
+            if (pre) {
+                pre.scrollTop = pre.scrollHeight;
+            }
+        }
+    });
+}
+
+function setText(id, text) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.textContent = text;
+    }
+}
+
+function setDot(id, cls) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.className = `dot ${cls}`;
+    }
+}
+
+function fmtNum(n) {
+    return Number(n || 0).toLocaleString('en-US');
+}
+
+function logTime(ts) {
+    const s = String(ts || '');
+    return s.length >= 23 ? s.slice(11, 23) : s;
+}
+
+function formatUptime(seconds) {
+    const sec = Math.floor(seconds);
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const ss = sec % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+    return d > 0 ? `${d}d ${pad(h)}:${pad(m)}` : `${pad(h)}:${pad(m)}:${pad(ss)}`;
 }

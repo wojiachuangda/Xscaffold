@@ -12,7 +12,8 @@ import { render } from './views/index.js';
 import { setSettingsOnSaved } from './views/settings.js';
 
 const POLL_INTERVAL_MS = 5000;
-const POLL_VIEWS = new Set(['runtime', 'inbox']);
+// runtime 移出轮询：它自管刷新（自有 interval + 持久 Live Logs SSE），整页重渲染会摧毁日志面板与流
+const POLL_VIEWS = new Set(['inbox']);
 
 document.addEventListener('DOMContentLoaded', bootstrap);
 

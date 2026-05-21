@@ -17,8 +17,11 @@ const SSE_CONTENT_TYPE = 'text/event-stream';
  * @returns {Promise<void>}       流自然结束 resolve；网络或契约错误 reject
  */
 export async function streamSse(path, options = {}) {
-    const reqOptions = buildRequestOptions({ method: 'POST', body: options.body }, true);
+    const reqOptions = buildRequestOptions({ method: options.method || 'POST', body: options.body }, true);
     reqOptions.headers.accept = SSE_CONTENT_TYPE;
+    if (options.signal) {
+        reqOptions.signal = options.signal;
+    }
     const response = await fetch(`${state.apiBase}${path}`, reqOptions);
     if (!response.ok) {
         const text = await response.text().catch(() => '');
