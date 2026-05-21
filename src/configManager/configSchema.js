@@ -81,6 +81,10 @@ const WorkflowConfigSchema = z
         name: z.string().min(1).max(128),
         version: z.union([z.string(), z.number()]).default('1.0'),
         description: z.string().max(2000).optional(),
+        trigger: z
+            .object({ cron: z.string().min(1).max(120) })
+            .strict()
+            .optional(),
         nodes: z.array(ConfigNodeSchema).min(1),
         edges: z.array(ConfigEdgeSchema).default([]),
     })

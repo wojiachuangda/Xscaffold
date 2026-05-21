@@ -49,6 +49,9 @@ const CodeNodeSchema = BaseNodeSchema.extend({
 
 const NodeSchema = z.discriminatedUnion('type', [AgentNodeSchema, ToolNodeSchema, ConditionNodeSchema, CodeNodeSchema]);
 
+// 触发器：有 trigger.cron = 受调度自动执行；无 trigger = 仅手动 / webhook
+const WorkflowTriggerSchema = z.object({ cron: z.string().min(1).max(120) }).strict();
+
 const EdgeSchema = z
     .object({
         from: NodeIdSchema,
@@ -62,6 +65,7 @@ const WorkflowSchema = z
         name: z.string().min(1).max(128),
         version: z.union([z.string(), z.number()]).default('1.0'),
         description: z.string().max(2000).optional(),
+        trigger: WorkflowTriggerSchema.optional(),
         nodes: z.array(NodeSchema).min(1),
         edges: z.array(EdgeSchema).default([]),
         tokenQuota: z.number().int().positive().max(10_000_000).optional(),
@@ -136,6 +140,7 @@ function buildAdjacency(wf) {
 
 module.exports = {
     WorkflowSchema,
+    WorkflowTriggerSchema,
     NodeSchema,
     EdgeSchema,
     AgentNodeSchema,

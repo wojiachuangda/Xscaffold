@@ -13,6 +13,7 @@ function start() {
     const app = createApp();
     const server = app.listen(PORT, () => {
         logger.info({ port: PORT, env: process.env.NODE_ENV || 'development' }, 'server started');
+        app.locals.deps?.scheduler?.start(); // 启动 cron 调度（createApp 不启，保测试干净）
     });
 
     let shuttingDown = false;
@@ -51,6 +52,9 @@ function start() {
  */
 async function gracefulShutdown(app) {
     const deps = (app.locals && app.locals.deps) || {};
+    if (deps.scheduler && typeof deps.scheduler.stop === 'function') {
+        deps.scheduler.stop();
+    }
     if (deps.queue && typeof deps.queue.close === 'function') {
         await deps.queue.close();
     }

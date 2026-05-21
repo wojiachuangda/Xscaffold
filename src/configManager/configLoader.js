@@ -120,6 +120,7 @@ function toWorkflowDef(config) {
         name: validated.name,
         version: validated.version,
         description: validated.description,
+        trigger: validated.trigger,
         nodes: validated.nodes.map(translateNode),
         edges: validated.edges,
     };

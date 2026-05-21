@@ -30,6 +30,13 @@ function buildWorkflowRouter(deps) {
         }),
     );
 
+    router.get(
+        '/schedules',
+        asyncHandler((req, res) => {
+            res.json(success(deps.scheduler ? deps.scheduler.listJobs() : []));
+        }),
+    );
+
     router.post(
         '/:id/execute',
         validate({ params: WorkflowIdParamSchema, body: ExecuteRequestSchema }),
@@ -83,15 +90,24 @@ function recordWorkflowMetrics(metricsExporter, workflowName, result) {
 }
 
 async function triggerExecute(req, res, deps) {
-    const def = deps.workflowRegistry.get(req.params.id);
-    const execution = await deps.executionStore.create({ workflowId: req.params.id, input: req.body.input || null });
-    await deps.queue.enqueue(WORKFLOW_QUEUE, {
-        workflowId: req.params.id,
-        executionId: execution.id,
-        input: req.body.input || null,
-    });
-    logger.info({ workflowId: req.params.id, executionId: execution.id, nodes: def.nodes.length }, 'workflow enqueued');
+    const execution = await enqueueWorkflowExecution(deps, req.params.id, req.body.input || null, 'manual');
     res.status(202).json(success(execution));
 }
 
-module.exports = { buildWorkflowRouter, WORKFLOW_QUEUE };
+/**
+ * 共享执行入口：create execution + enqueue。HTTP 路由与调度器共用。
+ * @param {{ workflowRegistry, executionStore, queue }} deps
+ * @param {string} workflowId
+ * @param {object|null} input
+ * @param {'manual'|'schedule'} [source]
+ * @returns {Promise<object>} execution 记录
+ */
+async function enqueueWorkflowExecution(deps, workflowId, input, source = 'manual') {
+    const def = deps.workflowRegistry.get(workflowId);
+    const execution = await deps.executionStore.create({ workflowId, input: input || null });
+    await deps.queue.enqueue(WORKFLOW_QUEUE, { workflowId, executionId: execution.id, input: input || null });
+    logger.info({ workflowId, executionId: execution.id, nodes: def.nodes.length, source }, 'workflow enqueued');
+    return execution;
+}
+
+module.exports = { buildWorkflowRouter, enqueueWorkflowExecution, WORKFLOW_QUEUE };

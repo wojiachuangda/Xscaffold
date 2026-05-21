@@ -37,6 +37,7 @@ function createWorkflowRegistry() {
             name: def.name,
             version: def.version,
             description: def.description,
+            trigger: def.trigger || null,
             nodeCount: def.nodes.length,
         }));
     }

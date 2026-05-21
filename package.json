@@ -30,6 +30,7 @@
     "better-sqlite3": "^11.10.0",
     "bullmq": "^5.76.10",
     "chokidar": "^4.0.3",
+    "croner": "^10.0.1",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "js-yaml": "^4.1.1",

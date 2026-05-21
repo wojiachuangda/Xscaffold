@@ -1,0 +1,14 @@
+# [scaffold] ID: V2.4-SCHED | Date: 2026-05-21 | Description: 调度器演示工作流——每分钟自动执行（trigger.cron），单 addNumbers 节点，无外部副作用
+name: scheduled-heartbeat
+version: '1.0'
+description: 调度演示——每分钟自动跑（trigger.cron）；单 addNumbers 节点，无 I/O 副作用，用于验证调度子系统
+trigger:
+  cron: '*/1 * * * *'
+nodes:
+  - id: ping
+    type: tool
+    toolName: addNumbers
+    description: 心跳加法（无副作用）
+    params:
+      a: 1
+      b: 1

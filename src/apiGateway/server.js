@@ -16,13 +16,14 @@ const { buildRouter: buildAgentRouter } = require('../agentManager/agentControll
 const { buildService } = require('../agentManager/agentService');
 const { buildRepository } = require('../agentManager/agentRepository');
 
-const { buildWorkflowRouter } = require('./controllers/workflowController');
+const { buildWorkflowRouter, enqueueWorkflowExecution } = require('./controllers/workflowController');
 const { buildWebhookRouter } = require('./controllers/webhookController');
 const { buildExecutionTraceRouter, buildMetricsRouter } = require('./controllers/observabilityController');
 const { buildRuntimeRouter } = require('./controllers/runtimeController');
 
 const { parseQueueConfig, createQueue } = require('../infrastructure/queue');
 const { createWorkflowRegistry, loadFromDirectorySync } = require('../workflowEngine/workflowRegistry');
+const { createScheduler } = require('../workflowEngine/scheduler');
 const { buildExecutionStore } = require('../workflowEngine/executionStore');
 const { createNodeRunner } = require('../workflowEngine/nodeRunner');
 const { createWorkflowExecutor } = require('../workflowEngine/workflowExecutor');
@@ -76,12 +77,24 @@ function buildDependencies(overrides) {
     const nodeRunner =
         overrides.nodeRunner || createNodeRunner({ toolRegistry, agentService, llmClient, memoryStore, ioorRecorder });
     const projectAssistantService = overrides.projectAssistantService || buildDefaultPaService(overrides);
+    const workflowRegistry = overrides.workflowRegistry || buildWorkflowRegistryWithAutoload(overrides);
+    const executionStore = overrides.executionStore || buildExecutionStore(overrides.db);
+    const queue = overrides.queue || createQueue(parseQueueConfig());
+    const scheduler =
+        overrides.scheduler ||
+        createScheduler({
+            workflowRegistry,
+            enqueue: (workflowId) =>
+                enqueueWorkflowExecution({ workflowRegistry, executionStore, queue }, workflowId, {}, 'schedule'),
+            logger,
+        });
     return {
         agentService,
         projectAssistantService,
-        workflowRegistry: overrides.workflowRegistry || buildWorkflowRegistryWithAutoload(overrides),
-        executionStore: overrides.executionStore || buildExecutionStore(overrides.db),
-        queue: overrides.queue || createQueue(parseQueueConfig()),
+        workflowRegistry,
+        executionStore,
+        queue,
+        scheduler,
         executor: overrides.executor || createWorkflowExecutor(nodeRunner),
         ioorRepository: overrides.ioorRepository || buildIoorRepository(overrides.db),
         // V1.5：暴露同一 recorder 实例，供 workflowController flush / trace lazy flush / main.js shutdown 共用
@@ -293,6 +306,7 @@ function mountProtectedRoutes(app, deps, overrides) {
             executor: deps.executor,
             ioorRecorder: deps.ioorRecorder,
             metricsExporter: deps.metricsExporter,
+            scheduler: deps.scheduler,
         }),
     );
 }
