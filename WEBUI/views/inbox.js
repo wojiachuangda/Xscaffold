@@ -1,6 +1,7 @@
-// [ui] ID: WEBUI-V2-TOKENS | Date: 2026-05-20 | Description: Inbox view — filter column + issue list (live from /workflows/executions failed/stuck/timeout) + detail (real error/trace + mock event timeline)
+// [ui] ID: WEBUI-V2.3-INBOX | Date: 2026-05-21 | Description: Inbox view — filter column + issue list (live /workflows/executions) + detail 接真 trace（GET /:id/trace 的 spans/ioor）
 'use strict';
 
+import { api } from '../lib/api.js';
 import { openExecutionTrace } from '../lib/actions.js';
 import { els } from '../lib/dom.js';
 import { state } from '../lib/state.js';
@@ -13,29 +14,18 @@ const SEV_TONE = {
     TIMEOUT: { dot: 'dot-warning', badge: 'badge-warning', label: 'timeout' },
 };
 
-const MOCK_TRACE = [
-    { n: 1, name: 'fetch input payload', state: 'ok', d: '42ms', detail: 'GET upstream · 200' },
-    { n: 2, name: 'acquire execution lock', state: 'ok', d: '18ms', detail: 'memory queue lock acquired' },
-    { n: 3, name: 'tool call · primary', state: 'ok', d: '1.84s', detail: 'tool returned 12 items' },
-    { n: 4, name: 'tool call · followup', state: 'fail', d: '—', detail: 'see real trace via the View trace button' },
-    { n: 5, name: 'commit final state', state: 'skip', d: '—', detail: 'skipped due to upstream failure' },
-];
-
-const TRACE_TONE = {
-    ok: { dot: 'dot-success', text: 'text-success', label: 'ok' },
-    fail: { dot: 'dot-error', text: 'text-error', label: 'failed' },
-    skip: { dot: 'dot-neutral', text: 'text-tertiary', label: 'skipped' },
+// node_traces.status 枚举 → 配色
+const SPAN_TONE = {
+    SUCCESS: { dot: 'dot-success', text: 'text-success' },
+    FAILED: { dot: 'dot-error', text: 'text-error' },
+    STUCK: { dot: 'dot-error', text: 'text-error' },
+    TIMEOUT: { dot: 'dot-warning', text: 'text-warning' },
+    RUNNING: { dot: 'dot-success', text: 'text-secondary' },
 };
 
-const MOCK_EVENTS = [
-    { t: '—', sev: 'err', msg: 'Execution flagged as terminal failure' },
-    { t: '—', sev: 'warn', msg: 'Retry attempted (see real trace)' },
-    { t: '—', sev: 'info', msg: 'Execution received by workflowController' },
-];
-
-const EV_DOT = { info: 'dot-neutral', warn: 'dot-warning', err: 'dot-error' };
-
 let filterMode = 'all';
+// executionId -> { executionId, spans[], ioor[] } | 'loading' | 'error'
+const traceCache = {};
 
 export function renderInbox() {
     const issues = (state.executions || []).filter((e) => ISSUE_STATUSES.has(e.status));
@@ -111,7 +101,7 @@ function filterButtonHtml(value, label, count, countCls) {
     `;
 }
 
-function bindFilterButtons(issues) {
+function bindFilterButtons() {
     document.querySelectorAll('#ib-filter [data-filter]').forEach((btn) => {
         btn.addEventListener('click', () => {
             filterMode = btn.dataset.filter;
@@ -178,11 +168,12 @@ function renderDetail(execution) {
             </div>
         </header>
         ${summarySectionHtml(execution)}
-        ${traceSectionHtml()}
+        ${traceSectionHtml(execution.id)}
     `;
     target.querySelector('[data-action="trace"]').addEventListener('click', (e) => {
         openExecutionTrace(e.currentTarget.dataset.id);
     });
+    maybeLoadTrace(execution.id);
 }
 
 function summarySectionHtml(execution) {
@@ -202,52 +193,115 @@ function summarySectionHtml(execution) {
     `;
 }
 
-function traceSectionHtml() {
+// 接真 trace：spans（node_traces）+ ioor（IOOR 记录），来自 GET /workflows/executions/:id/trace
+function traceSectionHtml(executionId) {
+    const cached = traceCache[executionId];
     return `
-        <section class="grid grid-cols-5 gap-6 p-6">
+        <section id="ib-trace-section" class="grid grid-cols-5 gap-6 p-6">
             <div class="card col-span-3">
-                <div class="h-8 px-4 flex items-center justify-between bd-b">
-                    <div class="flex items-center gap-2"><span class="t-sm t-medium">Execution Trace</span><span class="t-xs text-tertiary">mock skeleton</span></div>
-                </div>
-                <ol class="divide-bd">${MOCK_TRACE.map(traceStepHtml).join('')}</ol>
+                <div class="h-8 px-4 flex items-center bd-b"><span class="t-sm t-medium">Execution Trace</span></div>
+                ${spansCardBody(cached)}
             </div>
             <div class="card col-span-2">
-                <div class="h-8 px-4 flex items-center justify-between bd-b">
-                    <span class="t-sm t-medium">Runtime Events</span>
-                    <span class="t-xs text-secondary">mock</span>
-                </div>
-                <ol class="p-4 flex flex-col gap-3">${MOCK_EVENTS.map(eventItemHtml).join('')}</ol>
+                <div class="h-8 px-4 flex items-center bd-b"><span class="t-sm t-medium">IOOR Turns</span></div>
+                ${ioorCardBody(cached)}
             </div>
         </section>
     `;
 }
 
-function traceStepHtml(s) {
-    const tone = TRACE_TONE[s.state];
-    const openAttr = s.state === 'fail' ? ' open' : '';
+function spansCardBody(cached) {
+    if (cached === undefined || cached === 'loading') {
+        return stateRow('加载 trace…');
+    }
+    if (cached === 'error') {
+        return stateRow('trace 加载失败');
+    }
+    const spans = cached.spans || [];
+    if (spans.length === 0) {
+        return stateRow('无 trace 记录（此 execution 未产生节点 trace）');
+    }
+    return `<ol class="divide-bd">${spans.map(spanStepHtml).join('')}</ol>`;
+}
+
+function ioorCardBody(cached) {
+    if (cached === undefined || cached === 'loading') {
+        return stateRow('加载中…');
+    }
+    if (cached === 'error') {
+        return stateRow('加载失败');
+    }
+    const ioor = cached.ioor || [];
+    if (ioor.length === 0) {
+        return stateRow('无 IOOR 记录');
+    }
+    return `<ol class="p-4 flex flex-col gap-3">${ioor.map(ioorItemHtml).join('')}</ol>`;
+}
+
+function stateRow(text) {
+    return `<div class="empty">${escapeHtml(text)}</div>`;
+}
+
+function spanStepHtml(span) {
+    const tone = SPAN_TONE[span.status] || SPAN_TONE.RUNNING;
+    const failed = span.status === 'FAILED' || span.status === 'STUCK' || span.status === 'TIMEOUT';
+    const detail = span.error
+        ? `${escapeHtml(span.error.code)} · ${escapeHtml(span.error.message)}`
+        : escapeHtml(outputPreview(span.output));
     return `
         <li>
-            <details${openAttr}>
+            <details${failed ? ' open' : ''}>
                 <summary class="px-4 py-3 hover:bg-hover flex items-center gap-3">
                     <span class="chev text-tertiary shrink-0"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></span>
                     <span class="dot ${tone.dot}"></span>
-                    <span class="t-xs text-tertiary t-num w-4 text-right">${s.n}</span>
-                    <span class="t-sm flex-1 t-truncate">${escapeHtml(s.name)}</span>
-                    <span class="t-xs text-secondary t-mono t-num">${s.d}</span>
-                    <span class="t-xs t-medium ${tone.text} w-16 text-right">${tone.label}</span>
+                    <span class="t-sm flex-1 t-truncate">${escapeHtml(span.nodeId)}</span>
+                    <span class="t-xs text-tertiary t-mono">${escapeHtml(span.nodeType)}</span>
+                    <span class="t-xs text-secondary t-mono t-num">${span.durationMs == null ? '—' : `${span.durationMs}ms`}</span>
+                    <span class="t-xs t-medium ${tone.text} w-16 text-right">${escapeHtml(span.status)}</span>
                 </summary>
-                <div class="pl-12 pr-4 pb-3 t-xs text-secondary">${escapeHtml(s.detail)}</div>
+                <div class="pl-12 pr-4 pb-3 t-xs text-secondary">${detail}</div>
             </details>
         </li>
     `;
 }
 
-function eventItemHtml(e) {
+function ioorItemHtml(record) {
+    const tokens = record.tokenUsage?.total ?? 0;
+    const tools = (record.toolCalls || []).length;
     return `
         <li class="tl">
-            <span class="tl-dot ${EV_DOT[e.sev]}"></span>
-            <div class="t-sm">${escapeHtml(e.msg)}</div>
-            <div class="t-xs text-tertiary t-num mt-1">${escapeHtml(e.t)}</div>
+            <span class="tl-dot dot-neutral"></span>
+            <div class="t-sm">${escapeHtml(record.nodeId)} · turn ${record.turnIndex}</div>
+            <div class="t-xs text-secondary mt-1">${escapeHtml(record.modelName || '—')} · ${tokens} tokens · ${tools} tool call(s) · ${record.latencyMs ?? '—'}ms</div>
+            <div class="t-xs text-tertiary t-num mt-1">${escapeHtml(formatTime(record.createdAt))}</div>
         </li>
     `;
+}
+
+function outputPreview(output) {
+    if (output === null || output === undefined) {
+        return '—';
+    }
+    const text = typeof output === 'string' ? output : JSON.stringify(output);
+    return text.length > 240 ? `${text.slice(0, 240)}…` : text;
+}
+
+async function maybeLoadTrace(executionId) {
+    if (traceCache[executionId] !== undefined) {
+        return;
+    }
+    traceCache[executionId] = 'loading';
+    try {
+        const payload = await api(`/workflows/executions/${encodeURIComponent(executionId)}/trace`);
+        traceCache[executionId] = payload.data || { spans: [], ioor: [] };
+    } catch (_err) {
+        traceCache[executionId] = 'error';
+    }
+    // fetch 期间用户可能切走视图 / 换选中项——只在仍停留时重渲染 trace 区
+    if (state.view === 'inbox' && state.selectedId === executionId) {
+        const section = document.getElementById('ib-trace-section');
+        if (section) {
+            section.outerHTML = traceSectionHtml(executionId);
+        }
+    }
 }
