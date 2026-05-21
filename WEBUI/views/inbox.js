@@ -163,8 +163,6 @@ function renderDetail(execution) {
             </div>
             <div class="flex items-center gap-2">
                 <button class="btn btn-secondary focus-ring" data-action="trace" data-id="${escapeHtml(execution.id)}">View trace</button>
-                <button class="btn btn-secondary focus-ring" disabled>Acknowledge</button>
-                <button class="btn btn-primary focus-ring" disabled>Resolve</button>
             </div>
         </header>
         ${summarySectionHtml(execution)}
