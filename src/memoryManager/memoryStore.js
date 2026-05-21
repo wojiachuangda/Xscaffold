@@ -25,19 +25,30 @@ function buildMemoryStore(repository, options = {}) {
         return await repository.insert(parsed);
     }
 
-    async function getHistory({ sessionId, limit } = {}) {
+    async function getHistory({ sessionId, limit, ownerId } = {}) {
         const parsed = parseOrThrow(HistoryFilterSchema, {
             sessionId,
+            ownerId,
             limit: limit ?? defaultWindow,
         });
-        return await repository.listRecent(parsed.sessionId, parsed.limit);
+        return await repository.listRecent(parsed.sessionId, parsed.limit, parsed.ownerId);
+    }
+
+    // 取该 session 当前归属 owner（null=无消息，可认领）；invoke 归属校验用
+    async function getSessionOwner(sessionId) {
+        return await repository.findSessionOwner(sessionId);
+    }
+
+    // session 消息总数（owner 可选）；截断「丢弃 N 条」精确计数用
+    async function countSession(sessionId, ownerId) {
+        return await repository.countBySession(sessionId, ownerId);
     }
 
     async function clearSession(sessionId) {
         return await repository.deleteSession(sessionId);
     }
 
-    return { saveMessage, getHistory, clearSession };
+    return { saveMessage, getHistory, getSessionOwner, countSession, clearSession };
 }
 
 function formatIssues(zodError) {

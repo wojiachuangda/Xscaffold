@@ -67,4 +67,35 @@ describe('memoryRepository', () => {
             ValidationError,
         );
     });
+
+    test('owner_id 缺省兜底 user_dev_default', async () => {
+        const m = await ctx.repo.insert({ sessionId: 's', role: 'user', content: 'x' });
+        expect(m.ownerId).toBe('user_dev_default');
+    });
+
+    test('listRecent owner 过滤——同 session 不同 owner 互不可见', async () => {
+        await ctx.repo.insert({ sessionId: 'shared', role: 'user', content: 'A', ownerId: 'u1' });
+        await ctx.repo.insert({ sessionId: 'shared', role: 'user', content: 'B', ownerId: 'u2' });
+        const u1 = await ctx.repo.listRecent('shared', 10, 'u1');
+        expect(u1.map((m) => m.content)).toEqual(['A']);
+        const u2 = await ctx.repo.listRecent('shared', 10, 'u2');
+        expect(u2.map((m) => m.content)).toEqual(['B']);
+        // 不传 owner → 全见（workflow 路径）
+        const all = await ctx.repo.listRecent('shared', 10);
+        expect(all).toHaveLength(2);
+    });
+
+    test('findSessionOwner——首条归属 / 空 session 返 null', async () => {
+        expect(await ctx.repo.findSessionOwner('ghost')).toBeNull();
+        await ctx.repo.insert({ sessionId: 'owned', role: 'user', content: 'x', ownerId: 'u7' });
+        expect(await ctx.repo.findSessionOwner('owned')).toBe('u7');
+    });
+
+    test('countBySession——owner 可选过滤', async () => {
+        await ctx.repo.insert({ sessionId: 'c', role: 'user', content: '1', ownerId: 'u1' });
+        await ctx.repo.insert({ sessionId: 'c', role: 'assistant', content: '2', ownerId: 'u1' });
+        await ctx.repo.insert({ sessionId: 'c', role: 'user', content: '3', ownerId: 'u2' });
+        expect(await ctx.repo.countBySession('c')).toBe(3);
+        expect(await ctx.repo.countBySession('c', 'u1')).toBe(2);
+    });
 });

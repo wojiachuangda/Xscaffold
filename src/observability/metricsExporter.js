@@ -2,6 +2,8 @@
 'use strict';
 
 const HISTOGRAM_BUCKETS_MS = [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000];
+// V2.6 长会话：历史加载条数桶（与 ms 桶不同量纲，单独定义）
+const HISTOGRAM_BUCKETS_COUNT = [1, 2, 5, 10, 20, 50, 100];
 
 function createMetricsExporter() {
     const state = {
@@ -9,6 +11,9 @@ function createMetricsExporter() {
         toolCalls: new Map(),
         llmTokens: new Map(),
         nodesExecution: new Map(),
+        // V2.6：无 label 的条数直方图 + 截断计数器
+        historyLoaded: { count: 0, sum: 0, buckets: new Map() },
+        historyTruncated: 0,
     };
 
     return {
@@ -17,10 +22,25 @@ function createMetricsExporter() {
         incrToolCall: (tool) => incrCounter(state.toolCalls, tool),
         incrLLMTokens: (model, kind, count) => incrCounter(state.llmTokens, `${model}|${kind}`, count),
         incrNodeExecution: (type, status) => incrCounter(state.nodesExecution, `${type}|${status}`),
+        observeHistoryLoaded: (count) => observeCountHistogram(state.historyLoaded, count),
+        incrHistoryTruncated: () => {
+            state.historyTruncated += 1;
+        },
         render: () => renderPrometheus(state),
         snapshot: () => snapshot(state),
         summary: () => buildSummary(state),
     };
+}
+
+// 无 label 条数直方图观测：count/sum + 各桶累计（le 语义：≤le 的观测数）
+function observeCountHistogram(hist, value) {
+    hist.count += 1;
+    hist.sum += value;
+    for (const le of HISTOGRAM_BUCKETS_COUNT) {
+        if (value <= le) {
+            hist.buckets.set(le, (hist.buckets.get(le) || 0) + 1);
+        }
+    }
 }
 
 function sumValues(map) {
@@ -69,7 +89,21 @@ function renderPrometheus(state) {
     renderCounter(lines, 'tool_call_total', state.toolCalls, ['tool']);
     renderCounter(lines, 'llm_tokens_total', state.llmTokens, ['model', 'kind']);
     renderCounter(lines, 'nodes_execution_total', state.nodesExecution, ['type', 'status']);
+    renderCountHistogram(lines, 'llm_history_messages_loaded', state.historyLoaded, HISTOGRAM_BUCKETS_COUNT);
+    lines.push('# TYPE llm_history_truncated_total counter');
+    lines.push(`llm_history_truncated_total ${state.historyTruncated}`);
     return `${lines.join('\n')}\n`;
+}
+
+// 无 label 直方图渲染：le 是唯一标签，避免复用 renderHistogram 的 key↔label 位置拼接（空 label 会错位）
+function renderCountHistogram(lines, name, hist, buckets) {
+    lines.push(`# TYPE ${name} histogram`);
+    for (const le of buckets) {
+        lines.push(`${name}_bucket{le="${le}"} ${hist.buckets.get(le) || 0}`);
+    }
+    lines.push(`${name}_bucket{le="+Inf"} ${hist.count}`);
+    lines.push(`${name}_sum ${hist.sum}`);
+    lines.push(`${name}_count ${hist.count}`);
 }
 
 function renderCounter(lines, name, map, labelKeys) {
@@ -111,6 +145,8 @@ function snapshot(state) {
         toolCalls: Object.fromEntries(state.toolCalls),
         llmTokens: Object.fromEntries(state.llmTokens),
         nodesExecution: Object.fromEntries(state.nodesExecution),
+        historyLoaded: { count: state.historyLoaded.count, sum: state.historyLoaded.sum },
+        historyTruncated: state.historyTruncated,
     };
 }
 

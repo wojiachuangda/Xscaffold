@@ -33,6 +33,14 @@
 
 Agent 实体：`{ id, name, description, model, tools[], status(enabled/disabled), createdAt, updatedAt }`。
 
+invoke body：`{ prompt, sessionId? }`（`.strict()`，多余字段 400）。
+
+**长会话记忆（V2.6）**：携 `sessionId` 时，invoke 前置该 session 的历史对话喂回 LLM，并把本轮 user + assistant final content 落库（trace 走 IOOR，不入对话记忆）；不携 `sessionId` 行为等价旧版（无状态）。
+- 历史窗口二者取严：`AGENT_HISTORY_MAX_MESSAGES`（默认 20）+ `AGENT_HISTORY_MAX_TOKENS`（默认 8000，估算）。
+- **归属隔离**：session 首次写入认领 `owner_id`；跨用户访问他人 session → **404**（不泄漏存在性）。
+- 流式 abort：assistant 落库带 `metadata.stopReason='aborted'`。
+- 服务端 memoryStore 为唯一权威源——不接受客户端伪造 `history[]`。
+
 ---
 
 ## 2. Workflows `/workflows` —— 工作流编排
@@ -118,11 +126,13 @@ workflow 可声明 `trigger.cron`（YAML/JSON 契约）；`scheduler.js`（crone
 - 安全审计死信通道（契约失败仍强写原始 payload）。
 
 ### 6.5 可观测
-4 个 Prometheus 指标（workflow_duration / tool_call / llm_tokens / nodes_execution）；
+6 个 Prometheus 指标（workflow_duration / tool_call / llm_tokens / nodes_execution /
+**llm_history_messages_loaded**(直方图,长会话历史加载条数) / **llm_history_truncated_total**(计数器,截断次数)）；
 Pino 结构化日志 + **双脱敏管道**（落库前 + 传输 SSE 前）；内存日志环形缓冲 + SSE。
 
 ### 6.6 基础设施
-记忆（会话消息 + 窗口截断）；队列（内存 / BullMQ+Redis 双驱动）；数据库（sqlite/postgres 驱动抽象 + 迁移）；
+记忆（会话消息 + 窗口截断 + **owner 隔离 + 长会话上下文装载** conversationContext）；
+队列（内存 / BullMQ+Redis 双驱动）；数据库（sqlite/postgres 驱动抽象 + 迁移）；
 安全（JWT + 限流 + SSRF 守卫 + metrics token timing-safe 比对 + 双脱敏 + 审计死信）；配置热加载（chokidar 监听 `workflows/`）。
 
 ---

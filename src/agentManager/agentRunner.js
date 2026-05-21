@@ -5,6 +5,7 @@ const crypto = require('crypto');
 
 const { toOpenAITools } = require('../infrastructure/llmClient/toolSchemaAdapter');
 const { computeProfileHash } = require('../observability/profileHash');
+const { loadHistory } = require('../memoryManager/conversationContext');
 
 const DEFAULT_MAX_ITERATIONS = Number(process.env.AGENT_MAX_ITERATIONS) || 8;
 
@@ -12,19 +13,27 @@ const DEFAULT_MAX_ITERATIONS = Number(process.env.AGENT_MAX_ITERATIONS) || 8;
  * @param {object} params
  * @param {object} params.agent     agent 实体（含 model / tools[] / description）
  * @param {string} params.prompt    用户指令
- * @param {{ llmClient, toolRegistry, ioorRecorder, db }} params.deps
- * @param {{ executionId?, sessionId? }} [params.ctx]
+ * @param {{ llmClient, toolRegistry, ioorRecorder, db, memoryStore?, metricsExporter? }} params.deps
+ * @param {{ executionId?, sessionId?, ownerId? }} [params.ctx]
  * @param {number} [params.maxIterations]
+ * @param {() => boolean} [params.shouldAbort] 流式客户端断连探测；true 时优雅收尾为 aborted
  * @returns {Promise<{ content, turns, tokenUsage, stopReason }>}
  */
-async function runAgentLoop({ agent, prompt, deps, ctx = {}, maxIterations, onEvent }) {
+async function runAgentLoop({ agent, prompt, deps, ctx = {}, maxIterations, onEvent, shouldAbort }) {
     const toolDefs = resolveAgentTools(agent, deps.toolRegistry);
     const openaiTools = toOpenAITools(toolDefs);
     const allowed = new Set(agent.tools || []);
-    const messages = [systemMessage(agent), { role: 'user', content: prompt }];
-    // 运行参数从 agent 实体取（拉出原硬编码）：max_turns / temperature；显式 maxIterations 优先
-    const limit = maxIterations ?? agent.maxTurns ?? DEFAULT_MAX_ITERATIONS;
-    const temperature = agent.temperature ?? 0.7;
+    // V2.6 长会话：前置 session 历史（条数+token 二者取严截断）；无 sessionId/memoryStore 则为空 → 行为等价旧版
+    const history = await loadHistory({
+        memoryStore: deps.memoryStore,
+        sessionId: ctx.sessionId,
+        ownerId: ctx.ownerId,
+        metrics: deps.metricsExporter,
+    });
+    const messages = [systemMessage(agent), ...history, { role: 'user', content: prompt }];
+    // F4：用户消息进入 agentic 循环前落库（assistant 在 finalize 落库）
+    await persistUserMessage({ agent, prompt, ctx, deps });
+    const { limit, temperature } = resolveRunParams(agent, maxIterations);
 
     const acc = { turns: [], tokenUsage: emptyUsage(), lastContent: '' };
     for (let turnIndex = 0; turnIndex < limit; turnIndex += 1) {
@@ -32,23 +41,71 @@ async function runAgentLoop({ agent, prompt, deps, ctx = {}, maxIterations, onEv
         accumulateUsage(acc.tokenUsage, result.tokenUsage);
         acc.lastContent = result.content || acc.lastContent;
 
-        const calls = result.toolCalls || [];
-        if (calls.length === 0) {
-            const turn = { turnIndex, content: result.content, toolCalls: [], observations: [] };
-            acc.turns.push(turn);
-            await recordTurn({ agent, turnIndex, messages, result, observations: [], ctx, deps });
-            emitTurn(onEvent, turn);
-            return finalize(acc, 'final');
+        // F5：每轮 chat 后探测断连，命中则优雅收尾（assistant 落库带 stopReason=aborted）
+        if (isAborted(shouldAbort)) {
+            return await finalizeRun(acc, 'aborted', { agent, ctx, deps });
         }
 
-        messages.push(assistantToolCallMessage(result));
-        const observations = await executeCalls(calls, allowed, deps, messages);
-        const turn = { turnIndex, content: result.content, toolCalls: calls, observations };
+        const calls = result.toolCalls || [];
+        const turn = { turnIndex, content: result.content, toolCalls: calls, observations: [] };
+        if (calls.length > 0) {
+            messages.push(assistantToolCallMessage(result));
+            turn.observations = await executeCalls(calls, allowed, deps, messages);
+        }
         acc.turns.push(turn);
-        await recordTurn({ agent, turnIndex, messages, result, observations, ctx, deps });
+        await recordTurn({ agent, turnIndex, messages, result, observations: turn.observations, ctx, deps });
         emitTurn(onEvent, turn);
+        if (calls.length === 0) {
+            return await finalizeRun(acc, 'final', { agent, ctx, deps });
+        }
     }
-    return finalize(acc, 'max_iterations');
+    return await finalizeRun(acc, 'max_iterations', { agent, ctx, deps });
+}
+
+// 运行参数从 agent 实体取（拉出原硬编码）：max_turns / temperature；显式 maxIterations 优先
+function resolveRunParams(agent, maxIterations) {
+    return {
+        limit: maxIterations ?? agent.maxTurns ?? DEFAULT_MAX_ITERATIONS,
+        temperature: agent.temperature ?? 0.7,
+    };
+}
+
+function isAborted(shouldAbort) {
+    return typeof shouldAbort === 'function' && shouldAbort();
+}
+
+// 收尾：落库 assistant 最终内容（F2/F4：只写 final content，不写 turns[]）再返回
+async function finalizeRun(acc, stopReason, { agent, ctx, deps }) {
+    await persistAssistantMessage({ agent, content: acc.lastContent, stopReason, ctx, deps });
+    return finalize(acc, stopReason);
+}
+
+// F4：用户消息落库；无 sessionId/memoryStore 则跳过（后向兼容）
+async function persistUserMessage({ agent, prompt, ctx, deps }) {
+    if (!deps.memoryStore || !ctx.sessionId) {
+        return;
+    }
+    await deps.memoryStore.saveMessage({
+        sessionId: ctx.sessionId,
+        ownerId: ctx.ownerId,
+        role: 'user',
+        content: prompt,
+        metadata: { agentId: agent.id },
+    });
+}
+
+// F2：assistant 最终回复落库（含 stopReason，aborted 时为中止累积内容）；trace 走 IOOR 不入对话记忆
+async function persistAssistantMessage({ agent, content, stopReason, ctx, deps }) {
+    if (!deps.memoryStore || !ctx.sessionId) {
+        return;
+    }
+    await deps.memoryStore.saveMessage({
+        sessionId: ctx.sessionId,
+        ownerId: ctx.ownerId,
+        role: 'assistant',
+        content: content || '',
+        metadata: { agentId: agent.id, model: agent.model, stopReason },
+    });
 }
 
 function resolveAgentTools(agent, toolRegistry) {

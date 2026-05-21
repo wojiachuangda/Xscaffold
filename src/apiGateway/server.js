@@ -115,6 +115,8 @@ function buildDependencies(overrides) {
         // V2-AGENT-LOOP：暴露给 /agents/:id/invoke 的 agentic loop 运行时依赖
         llmClient,
         toolRegistry,
+        // V2.6 长会话：invoke 路径接入多轮记忆需要 memoryStore（此前仅 nodeRunner 用）
+        memoryStore,
         db: overrides.db,
     };
 }
@@ -298,6 +300,9 @@ function mountProtectedRoutes(app, deps, overrides) {
             llmClient: deps.llmClient,
             toolRegistry: deps.toolRegistry,
             ioorRecorder: deps.ioorRecorder,
+            // V2.6 长会话：多轮记忆 + 历史加载/截断指标
+            memoryStore: deps.memoryStore,
+            metricsExporter: deps.metricsExporter,
             db: deps.db,
         }),
     );

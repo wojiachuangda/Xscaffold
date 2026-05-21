@@ -1,30 +1,36 @@
 # 🧭 AA-SEAC 实时项目文件拓扑树 (自动生成版)
 
 > **注意**：本文件由底层巡检工具 `pureTreeGenerator.js` 自动生成并覆盖刷新。请勿手动修改本文件。
-> **最新刷新时间**：`2026-05-20 02:43:45`
+> **最新刷新时间**：`2026-05-21 22:00:03`
 
 ```text
 src/
 ├── agentManager/
 │   ├── agentController.js               # 职责: Agent REST 路由控制器（async service；仅抛 AppError 由全局中间件兜底）
 │   ├── agentRepository.js               # 职责: Agent 数据访问层（async 契约；SQL 仅出现在此文件；AA-SEAC §3 约束 4）
+│   ├── agentRunner.js                   # 职责: Agentic tool-calling 循环——LLM 决策调 tool → 执行 → observation 回灌，白名单约束 + IOOR 全留痕
 │   ├── agentSchema.js                   # 职责: Agent 实体 Zod Schema（AA-SEAC §3 约束 2 入参强校验、§4.1 代码即契约）
 │   └── agentService.js                  # 职责: Agent 业务编排层（async；严禁直接调 SQL；依赖 repository 抽象）
 ├── apiGateway/
 │   ├── controllers/
 │   │   ├── observabilityController.js       # 职责: 可观测性路由（trace 查询 + /metrics 端点；metrics 强制 token + timing-safe 比对）
+│   │   ├── runtimeController.js             # 职责: Runtime 视图后端——/runtime/metrics 指标摘要 + /runtime/logs 快照 + /runtime/logs/stream SSE 实时日志
 │   │   ├── webhookController.js             # 职责: Webhook 路由——签名校验后入队触发工作流（async store）
 │   │   └── workflowController.js            # 职责: 工作流路由控制器（async store；POST execute 202 异步 + GET status）
 │   ├── middlewares/
+│   │   ├── apiKeyMiddleware.js              # 职责: API Key 认证中间件——X-API-Key → SHA-256 哈希 → 查 active key → 查 active user → 注入 req.user；无 key 放行给 JWT/AUTH_DISABLED
 │   │   ├── asyncHandler.js                  # 职责: 异步路由处理器包装——自动 catch 异常转发给全局错误中间件
 │   │   ├── authMiddleware.js                # 职责: JWT 认证中间件（含豁免白名单与开发期总开关）
+│   │   ├── corsMiddleware.js                # 职责: CORS 中间件——origin 白名单回显 + Allow-Credentials + 预检 204；默认放行 127.0.0.1/localhost:9527 与 5173
 │   │   ├── errorHandler.js                  # 职责: Express 全局错误中间件——将异常归一化为统一响应契约
 │   │   ├── rateLimiter.js                   # 职责: 滑动窗口内存限流中间件（IP/sub 双粒度，超限返回 429+Retry-After）
 │   │   ├── validateMiddleware.js            # 职责: 通用 Zod 入参校验中间件（AA-SEAC §3 约束 2）
 │   │   └── webhookSignature.js              # 职责: Webhook 签名验证（GitHub HMAC-SHA256，时间窗口防重放）
 │   ├── response/
-│   │   └── envelope.js                      # 职责: 统一 API 响应契约 { success, data, error, meta } 的构造函数
-│   └── server.js                        # 职责: Express 应用工厂——装配中间件、路由、错误处理、可观测性（async store/repo）
+│   │   ├── envelope.js                      # 职责: 统一 API 响应契约 { success, data, error, meta } 的构造函数
+│   │   └── sseEventSchema.js                # 职责: SSE 流式事件 Zod 契约——agent invoke 流式端点对外的 start/turn/done/error 判别联合
+│   ├── server.js                        # 职责: Express 应用工厂——装配中间件、路由、错误处理、可观测性（async store/repo）
+│   └── sse.js                           # 职责: SSE 流式通道——传输前强制脱敏不可信子载荷的唯一出口 + 心跳 + 连接生命周期（AA-SEAC §4.5 传输流式脱敏）
 ├── configManager/
 │   ├── configLoader.js                  # 职责: 配置加载器——YAML/JSON 解析 + Zod 校验 + 转换为 workflowDef
 │   ├── configSchema.js                  # 职责: YAML/JSON 工作流配置 Schema 与到 workflowDef 的转换契约
@@ -36,6 +42,8 @@ src/
 │       ├── digestBuilder.js                 # 职责: digest 数据组装与 markdown 渲染（纯函数，无 I/O）
 │       ├── externalAgentClient.js           # 职责: 外部常驻 Agent HTTP adapter（SSRF 校验 + 固定请求体 + 超时 + 输出截断）
 │       ├── externalAgentProfiles.js         # 职责: 外部常驻 Agent profile 白名单（URL 固定在服务端，Agent/用户不可传入）
+│       ├── projectAssistantController.js    # 职责: Project Assistant 9 个 REST endpoint（GET/PUT/POST projects/tasks/events/reminders），URL :id 与 body.projectId 一致性校验
+│       ├── projectAssistantService.js       # 职责: Project Assistant 业务层，组合 4 个 repo；前置 project 存在校验（PUT 除外）
 │       ├── repositories/
 │       │   ├── eventRepository.js               # 职责: Event 数据访问层（不可变事件流水；async 契约；SQL 仅在此文件；AA-SEAC §3 约束 4）
 │       │   ├── externalAgentCallRepository.js   # 职责: external_agent_calls 审计日志仓储（async；SQL 仅此文件；不暴露列表 Tool）
@@ -50,6 +58,13 @@ src/
 │           ├── projectSchema.js                 # 职责: Project 实体 Zod 契约（projectGetStatus / projectUpdateStatus 入参与实体）
 │           ├── reminderSchema.js                # 职责: Reminder 实体 Zod 契约（reminderCreate / reminderListDue 入参与实体）
 │           └── taskSchema.js                    # 职责: Task 实体 Zod 契约（taskList / taskUpsert 入参与实体）
+├── identity/
+│   ├── apiKeyRepository.js              # 职责: ApiKey 数据访问层（async 契约；SQL 仅此文件；只存哈希）
+│   ├── apiKeySchema.js                  # 职责: ApiKey 实体 Zod 契约（多租户：Header key → user 解析；库内只存 SHA-256 哈希）
+│   ├── currentUser.js                   # 职责: 当前用户解析——统一从 req.user 取归属 id（API key 的 id / JWT 的 sub / dev 默认），供 agent owner scope 用
+│   ├── keyUtil.js                       # 职责: API key 生成与哈希——明文 sk_ 前缀高熵随机；库内只存 SHA-256（key 高熵，等价 token，无需 bcrypt）
+│   ├── userRepository.js                # 职责: User 数据访问层（async 契约；SQL 仅此文件；AA-SEAC §3 约束 4）
+│   └── userSchema.js                    # 职责: User 实体 Zod 契约（多租户：agent 归属的用户/租户主体）
 ├── infrastructure/
 │   ├── database/
 │   │   ├── connection.js                    # 职责: Driver dispatch + 懒加载单例（替换 v1.1 better-sqlite3 直耦合，AA-SEAC §3 约束 4）
@@ -68,7 +83,10 @@ src/
 │   │   │   │   ├── 004_create_traces.sql            # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
 │   │   │   │   ├── 005_create_ioor.sql              # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
 │   │   │   │   ├── 006_create_project_assistant_core.sql # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
-│   │   │   │   └── 007_create_external_agent_calls.sql # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │   │   ├── 007_create_external_agent_calls.sql # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │   │   ├── 008_create_users_apikeys.sql     # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │   │   ├── 009_alter_agents_owner.sql       # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │   │   └── 010_alter_messages_owner.sql     # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
 │   │   │   └── sqlite/
 │   │   │       ├── 001_create_agents.sql            # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
 │   │   │       ├── 002_create_executions.sql        # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
@@ -76,14 +94,18 @@ src/
 │   │   │       ├── 004_create_traces.sql            # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
 │   │   │       ├── 005_create_ioor.sql              # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
 │   │   │       ├── 006_create_project_assistant_core.sql # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
-│   │   │       └── 007_create_external_agent_calls.sql # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │       ├── 007_create_external_agent_calls.sql # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │       ├── 008_create_users_apikeys.sql     # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │       ├── 009_alter_agents_owner.sql       # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
+│   │   │       └── 010_alter_messages_owner.sql     # 职责: ⚠️ [不合规] 缺失标准文件头注释 (Description)，请开发或编排 AI 立即补齐
 │   │   └── schemas/
 │   │       ├── driverConfigSchema.js            # 职责: Driver 配置 Zod 契约——sqlite/postgres 双分支 discriminated union（AA-SEAC §4.1 代码即契约）
 │   │       └── queryResultSchema.js             # 职责: Driver query/run 返回结构 Zod 契约（AA-SEAC §3 约束 4：Repository 上层只感知此抽象）
 │   ├── errors/
 │   │   └── AppError.js                      # 职责: 应用统一错误基类与典型子类（AA-SEAC §3 约束 1 统一响应契约）
 │   ├── llmClient/
-│   │   └── openaiClient.js                  # 职责: OpenAI 兼容 Chat Completion 客户端（IOOR 元数据抓取 + 重试 + 超时）
+│   │   ├── openaiClient.js                  # 职责: OpenAI 兼容 Chat Completion 客户端（IOOR 元数据抓取 + 重试 + 超时）
+│   │   └── toolSchemaAdapter.js             # 职责: 把 toolRegistry 的 Zod paramsSchema 转成 OpenAI function-calling tools 数组
 │   ├── queue/
 │   │   ├── bullmqAdapter.js                 # 职责: BullMQ + Redis 持久化队列适配器（per-name Queue/Worker；每实例独立 ioredis 连接；BullMQ error 事件兜底）
 │   │   ├── index.js                         # 职责: 队列 driver dispatch——按 QUEUE_DRIVER + REDIS_URL 选择 memory/bullmq 实现
@@ -94,6 +116,7 @@ src/
 │       └── timingSafe.js                    # 职责: 恒定时间字符串比对 helper——webhook 签名与 metrics token 共用，杜绝时序侧信道
 ├── main.js                          # 职责: 应用入口——启动 Express + 优雅停机：先停 HTTP 收新请求，再 await queue.close() 等在途 job
 ├── memoryManager/
+│   ├── conversationContext.js           # 职责: invoke 长会话上下文装配——会话历史加载 + 归属校验 + 二者取严截断 + 指标 + 降级
 │   ├── memoryRepository.js              # 职责: messages 表 Repository（async 契约；SQL 仅在此文件）
 │   ├── memorySchema.js                  # 职责: 会话消息契约（AA-SEAC §4.1 代码即契约）
 │   └── memoryStore.js                   # 职责: 记忆业务层（async；窗口截断 + Zod 校验）
@@ -103,6 +126,7 @@ src/
 │   ├── ioorRepository.js                # 职责: IOOR 记录存储（async 契约；SQL 仅在此文件）
 │   ├── ioorSchema.js                    # 职责: IOOR 协议契约（AA-SEAC §4.2 全量流式追踪）
 │   ├── logger.js                        # 职责: Pino logger（双脱敏管道：redact.paths 主线程序列化阶段 + V1.5 worker thread async transport 让日志 I/O 离开热路径）
+│   ├── logRingBuffer.js                 # 职责: 内存日志环形缓冲——留最近 N 行（已脱敏 JSON 解析后的结构）+ 订阅通知，供 Live Logs /logs 与 SSE 流读取
 │   ├── metricsExporter.js               # 职责: Prometheus 文本格式指标导出（4 个核心指标）
 │   ├── profileHash.js                   # 职责: Agent 画像 SHA-256 计算（AA-SEAC §4.4 角色画像版本化）
 │   ├── redact.js                        # 职责: 深度对象脱敏工具（用于 SSE 流式输出/IOOR 落库前的二次保险）
@@ -140,6 +164,7 @@ src/
     ├── executionStore.js                # 职责: 工作流执行记录持久化（async Repository；SQL 仅出现此文件）
     ├── expressionEvaluator.js           # 职责: 工作流表达式求值器（{{path}} 模板 + 安全布尔表达式，禁用 JS eval）
     ├── nodeRunner.js                    # 职责: 节点执行器：四类节点 + 超时/重试 + 记忆/IOOR/自愈/trace 集成
+    ├── scheduler.js                     # 职责: 工作流调度器——按 workflow.trigger.cron 注册定时任务，到点 enqueue 执行（croner，queue-agnostic）；start/stop/reload/listJobs
     ├── selfHealing.js                   # 职责: 有界自愈控制器（AA-SEAC §5：契约失败重投喂 ≤2 次，超限转 STUCK）
     ├── taskStateMachine.js              # 职责: 任务状态机（AA-SEAC §3 约束 3：独立纯函数，对外仅暴露 transition）
     ├── tokenQuota.js                    # 职责: 工作流 Token 配额熔断（不计 cached；超额抛 TokenQuotaError）

@@ -12,6 +12,7 @@ const { logger } = require('../observability/logger');
 const { CreateAgentSchema, UpdateAgentSchema, ListAgentsFilterSchema } = require('./agentSchema');
 const { runAgentLoop, newInvocationId } = require('./agentRunner');
 const { ownerIdOf } = require('../identity/currentUser');
+const { assertSessionOwnership } = require('../memoryManager/conversationContext');
 
 const IdParamSchema = z.object({ id: z.string().min(1).max(64) });
 
@@ -24,15 +25,22 @@ const InvokeAgentSchema = z
 
 /**
  * @param {{ createAgent, updateAgent, deleteAgent, getAgentById, listAgents }} service
- * @param {{ llmClient, toolRegistry, ioorRecorder, db }} [invokeDeps] agentic loop 运行时依赖
+ * @param {{ llmClient, toolRegistry, ioorRecorder, db, memoryStore, metricsExporter }} [invokeDeps] agentic loop 运行时依赖
  */
 function mountInvokeRoute(router, service, invokeDeps) {
     router.post(
         '/:id/invoke',
         validate({ params: IdParamSchema, body: InvokeAgentSchema }),
         asyncHandler(async (req, res) => {
-            const agent = await service.getAgentById(req.params.id, ownerIdOf(req));
-            const ctx = { executionId: newInvocationId(), sessionId: req.body.sessionId };
+            const ownerId = ownerIdOf(req);
+            const agent = await service.getAgentById(req.params.id, ownerId);
+            // 跨用户访问他人 session → 404（开任何副作用前校验）
+            await assertSessionOwnership({
+                memoryStore: invokeDeps.memoryStore,
+                sessionId: req.body.sessionId,
+                ownerId,
+            });
+            const ctx = { executionId: newInvocationId(), sessionId: req.body.sessionId, ownerId };
             const result = await runAgentLoop({ agent, prompt: req.body.prompt, deps: invokeDeps, ctx });
             res.json(success(result));
         }),
@@ -52,8 +60,11 @@ function mountInvokeStreamRoute(router, service, invokeDeps) {
  * getAgentById 在开流前——agent 不存在仍走全局 errorHandler 的 JSON 404。
  */
 async function runInvokeStream(req, res, service, invokeDeps) {
-    const agent = await service.getAgentById(req.params.id, ownerIdOf(req));
-    const ctx = { executionId: newInvocationId(), sessionId: req.body.sessionId };
+    const ownerId = ownerIdOf(req);
+    const agent = await service.getAgentById(req.params.id, ownerId);
+    // 归属校验在开流前——跨用户走全局 errorHandler 的 JSON 404（header 未发）
+    await assertSessionOwnership({ memoryStore: invokeDeps.memoryStore, sessionId: req.body.sessionId, ownerId });
+    const ctx = { executionId: newInvocationId(), sessionId: req.body.sessionId, ownerId };
     const stream = openSseStream(res);
     try {
         stream.send(buildStartEvent(ctx, agent));
@@ -63,6 +74,7 @@ async function runInvokeStream(req, res, service, invokeDeps) {
             deps: invokeDeps,
             ctx,
             onEvent: (event) => sendSafe(stream, event),
+            shouldAbort: () => stream.isClosed(),
         });
         stream.send(buildDoneEvent(result));
     } catch (err) {
