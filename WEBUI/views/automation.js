@@ -20,18 +20,36 @@ const HISTORY_LIMIT = 20;
 
 // workflowId -> { items, total } | 'loading' | 'error'
 const historyCache = {};
+// workflowId -> nextRun(ISO)，来自 /workflows/schedules
+let scheduleMap = {};
 
-export function renderAutomation() {
+export async function renderAutomation() {
     const workflows = state.workflows || [];
     els.viewBody.innerHTML = shellHtml(workflows);
     if (workflows.length === 0) {
         renderDetailEmpty();
         return;
     }
+    await loadSchedules();
+    if (state.view !== 'automation') {
+        return; // fetch 期间切走视图
+    }
     renderList(workflows);
     const selected = workflows.find((w) => w.id === state.selectedId) || workflows[0];
     state.selectedId = selected.id;
     openDetail(selected);
+}
+
+async function loadSchedules() {
+    try {
+        const payload = await api('/workflows/schedules');
+        scheduleMap = {};
+        for (const s of payload.data || []) {
+            scheduleMap[s.workflowId] = s.nextRun;
+        }
+    } catch (_err) {
+        scheduleMap = {};
+    }
 }
 
 function shellHtml(workflows) {
@@ -79,6 +97,7 @@ function workflowRowHtml(workflow, selected) {
             <div class="flex items-center gap-3 min-w-0">
                 <span class="dot ${tone.dot} shrink-0"></span>
                 <span class="t-sm t-medium t-truncate flex-1">${escapeHtml(workflow.name || workflow.id)}</span>
+                ${workflow.trigger?.cron ? '<span class="badge badge-primary shrink-0">cron</span>' : ''}
                 <span class="t-xs text-tertiary shrink-0">${workflow.nodeCount ?? '—'}n</span>
             </div>
             <div class="t-xs text-secondary t-mono pl-4 mt-1 t-truncate">${escapeHtml(workflow.id)} · ${escapeHtml(String(workflow.version ?? '1.0'))}</div>
@@ -145,10 +164,19 @@ function definitionSectionHtml(workflow) {
             <dl class="grid grid-cols-3 gap-x-6 mt-6">
                 <div><dt class="t-xs t-upper t-medium text-tertiary mb-1">Version</dt><dd class="t-sm t-mono">${escapeHtml(String(workflow.version ?? '1.0'))}</dd></div>
                 <div><dt class="t-xs t-upper t-medium text-tertiary mb-1">Nodes</dt><dd class="t-sm t-num">${workflow.nodeCount ?? '—'}</dd></div>
-                <div><dt class="t-xs t-upper t-medium text-tertiary mb-1">Source</dt><dd class="t-sm">workflows/</dd></div>
+                <div><dt class="t-xs t-upper t-medium text-tertiary mb-1">Trigger</dt><dd class="t-sm">${triggerHtml(workflow)}</dd></div>
             </dl>
         </section>
     `;
+}
+
+function triggerHtml(workflow) {
+    const cron = workflow.trigger?.cron;
+    if (!cron) {
+        return '<span class="text-secondary">manual</span>';
+    }
+    const next = scheduleMap[workflow.id];
+    return `<span class="t-mono">${escapeHtml(cron)}</span>${next ? ` · next ${escapeHtml(formatTime(next))}` : ''}`;
 }
 
 function historySectionHtml(workflowId) {
