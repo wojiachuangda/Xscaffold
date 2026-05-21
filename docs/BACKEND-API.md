@@ -39,8 +39,9 @@ Agent 实体：`{ id, name, description, model, tools[], status(enabled/disabled
 
 | 方法 | 路径 | 功能 |
 |---|---|---|
-| GET | `/workflows` | 列出工作流 `{ id, name, version, description, nodeCount }` |
-| POST | `/workflows/:id/execute` | 触发执行（202 异步入队） |
+| GET | `/workflows` | 列出工作流 `{ id, name, version, description, trigger, nodeCount }` |
+| GET | `/workflows/schedules` | 列出受 cron 调度的工作流 `{ workflowId, cron, nextRun }` |
+| POST | `/workflows/:id/execute` | 手动触发执行（202 异步入队） |
 | GET | `/workflows/executions/:id` | 取执行状态 |
 | GET | `/workflows/executions` | 执行列表（分页 + 按 `workflowId` / `status` 过滤） |
 | GET | `/workflows/executions/:id/trace` | 执行轨迹：`{ executionId, spans[](节点 trace), ioor[](IOOR 记录) }` |
@@ -103,6 +104,13 @@ LLM 决策 → 解析 `tool_calls` → 白名单校验 + 执行工具 → `obser
 逐节点超时 + 重试；**有界自愈**（契约失败重投喂 LLM ≤2 次，超限转 STUCK + 告警）；Token 配额熔断；
 独立任务状态机（`transition(state, action)` 纯函数）。
 
+### 6.3b 调度子系统（cron 自动化）
+workflow 可声明 `trigger.cron`（YAML/JSON 契约）；`scheduler.js`（croner）在 `main.js` 启动期按 cron
+注册定时任务，到点走 `enqueueWorkflowExecution` 自动执行（queue-agnostic，dev/prod 一致）。
+`createApp` 只建不启（保测试干净），shutdown 时 stop。本地时区。
+`GET /workflows/schedules` 暴露 next-run。
+（注：cron 在启动期从 `workflows/` 加载；新增/改 cron 需重启，无 live hot-reload。）
+
 ### 6.4 执行与全链路追踪
 - 执行记录（executionStore）；节点级 trace（spans）；
 - **IOOR 协议**（Input/Output/Action/Response 四元，并发 tool_calls/observations 数组）；批量缓冲落库（有界窗口）；
@@ -128,4 +136,5 @@ Pino 结构化日志 + **双脱敏管道**（落库前 + 传输 SSE 前）；内
 | `/workflows`、`/workflows/executions` | ✅ Automation（目录 + 历史 + Run）+ Executions |
 | `/workflows/executions/:id/trace` | ✅ Inbox 详情 trace |
 | `/runtime/*`、`/healthz`、`/readyz` | ✅ Runtime（状态 + 引擎 + 健康 + Live Logs） |
-| 工作流触发器/cron 调度、agent 任务维度查询 | ❌ 后端契约暂无，见 `docs/planning/UI-BACKEND-GAP-INVENTORY.md` |
+| `/workflows/schedules`、workflow `trigger.cron` 调度 | 🟡 后端已实现（调度器自动跑）；automation 前端显示 trigger/next-run 待第 2 轮 |
+| agent 任务维度查询、inbox ack/resolve | ❌ 后端契约暂无，见 `docs/planning/UI-BACKEND-GAP-INVENTORY.md` |
