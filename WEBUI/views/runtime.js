@@ -1,4 +1,4 @@
-// [ui] ID: WEBUI-V2.3-RUNTIME | Date: 2026-05-21 | Description: Runtime 单页健康面板——Status(/healthz+/readyz) + Engine(/runtime/metrics) + Health + Live Logs(/runtime/logs/stream SSE)；自管刷新 + 离开自清理
+// [ui] ID: WEBUI-V2.3-RUNTIME | Date: 2026-05-21 | Description: Runtime 三栏健康面板——左栏章节导航(Overview/Engine/Health/Live Logs) + 主区显示选中章节；Live Logs 走 SSE，自管刷新 + 离开自清理
 'use strict';
 
 import { api } from '../lib/api.js';
@@ -9,21 +9,25 @@ import { escapeHtml } from '../lib/utils.js';
 
 const REFRESH_MS = 5000;
 const MAX_LOG_DOM = 500;
+const SECTIONS = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'engine', label: 'Engine Activity' },
+    { id: 'health', label: 'Health Checks' },
+    { id: 'logs', label: 'Live Logs' },
+];
 const LEVEL_CLS = { info: 'term-info', warn: 'term-warn', error: 'term-err', fatal: 'term-err', debug: 'term-mute', trace: 'term-mute' };
 const LEVEL_LBL = { info: 'INFO', warn: 'WARN', error: 'ERR ', fatal: 'FATL', debug: 'DBG ', trace: 'TRC ' };
 
+let selectedSection = 'overview';
 let logsAbort = null;
 let refreshTimer = null;
 let paused = false;
 
 export function renderRuntime() {
     cleanup();
-    paused = false;
     els.viewBody.innerHTML = shellHtml();
-    bindPause();
-    updateStatus();
-    updateMetrics();
-    startLogStream();
+    renderSectionList();
+    selectSection(selectedSection);
     refreshTimer = setInterval(tick, REFRESH_MS);
 }
 
@@ -41,71 +45,134 @@ function cleanup() {
         clearInterval(refreshTimer);
         refreshTimer = null;
     }
-    if (logsAbort) {
-        logsAbort.abort();
-        logsAbort = null;
-    }
+    stopLogStream();
 }
 
 function shellHtml() {
     return `
+        <aside class="w-list bg-panel bd-r flex flex-col shrink-0">
+            <div class="h-12 px-4 flex items-center justify-between bd-b">
+                <span class="t-base">Runtime</span>
+                <span class="flex items-center gap-2"><span id="rt-nav-dot" class="dot dot-neutral"></span></span>
+            </div>
+            <ul id="rt-sections" class="flex-1 overflow-y-auto scroll-thin"></ul>
+            <div class="px-4 py-2 bd-t t-xs text-tertiary">single process · live</div>
+        </aside>
         <main class="flex-1 overflow-hidden flex flex-col">
             <header class="h-12 px-6 flex items-center justify-between bd-b bg-panel shrink-0">
-                <div class="flex items-center gap-4 min-w-0">
-                    <h1 class="t-base">Runtime</h1>
-                    <span class="flex items-center gap-2">
-                        <span id="rt-status-dot" class="dot dot-neutral"></span>
-                        <span id="rt-status-text" class="t-sm text-secondary">…</span>
-                    </span>
+                <h1 id="rt-section-title" class="t-base">Overview</h1>
+                <div class="flex items-center gap-3">
+                    <span class="flex items-center gap-2"><span id="rt-status-dot" class="dot dot-neutral"></span><span id="rt-status-text" class="t-sm text-secondary">…</span></span>
+                    <span class="t-xs text-tertiary">·</span>
+                    <span id="rt-uptime" class="t-xs text-tertiary t-mono">uptime —</span>
                 </div>
-                <span id="rt-uptime" class="t-xs text-tertiary t-mono">uptime —</span>
             </header>
-            <div class="flex-1 overflow-y-auto scroll-thin">
-                <section class="px-6 pt-6">
-                    <div class="grid grid-cols-4 gap-4">
-                        ${valCard('Uptime', '<span id="rt-uptime-val" class="t-lg t-num">—</span>', 'process uptime')}
-                        ${dotCard('Process', 'rt-proc', 'healthz · readyz')}
-                        ${dotCard('Database', 'rt-db', 'readiness probe')}
-                        ${dotCard('Queue', 'rt-q', 'readiness probe')}
-                    </div>
-                </section>
-                <section class="px-6 pt-6">
-                    <div class="flex items-baseline justify-between mb-3">
-                        <h2 class="t-sm t-medium">Engine Activity</h2>
-                        <span class="t-xs text-tertiary">since process start</span>
-                    </div>
-                    <div class="grid grid-cols-4 gap-4">
-                        ${numCard('Nodes executed', 'rt-nodes')}
-                        ${numCard('Tool calls', 'rt-tools')}
-                        ${numCard('LLM tokens', 'rt-tokens')}
-                        ${numCard('Workflow duration avg', 'rt-wfdur')}
-                    </div>
-                </section>
-                <section class="px-6 pt-6">
-                    <div class="flex items-baseline justify-between mb-3">
-                        <h2 class="t-sm t-medium">Health Checks</h2>
-                        <span class="t-xs text-tertiary">readiness probes</span>
-                    </div>
-                    <div class="card"><ul class="divide-bd">
-                        ${healthRow('Database', 'sqlite', 'rt-health-db')}
-                        ${healthRow('Job Queue', 'in-memory', 'rt-health-q')}
-                    </ul></div>
-                </section>
-                <section class="px-6 py-6">
-                    <div class="flex items-baseline justify-between mb-3">
-                        <h2 class="t-sm t-medium">Live Logs</h2>
-                        <span class="t-xs text-tertiary">ring buffer · 实时 SSE</span>
-                    </div>
-                    <div class="card flex flex-col">
-                        <div class="h-8 px-4 flex items-center justify-between bd-b shrink-0">
-                            <div class="flex items-center gap-2"><span class="dot dot-success"></span><span class="t-xs text-secondary">streaming</span></div>
-                            <button id="rt-log-pause" class="tab focus-ring">Pause</button>
-                        </div>
-                        <pre id="rt-log" class="term flex-1 px-4 py-3 overflow-y-auto scroll-thin m-0 max-h-list"></pre>
-                    </div>
-                </section>
-            </div>
+            <div id="rt-main" class="flex-1 min-h-0 flex flex-col overflow-hidden"></div>
         </main>
+    `;
+}
+
+function renderSectionList() {
+    const ul = document.getElementById('rt-sections');
+    if (!ul) {
+        return;
+    }
+    ul.innerHTML = SECTIONS.map((s) => sectionRowHtml(s)).join('');
+    ul.querySelectorAll('li[data-id]').forEach((li) => {
+        li.addEventListener('click', () => selectSection(li.dataset.id));
+    });
+}
+
+function sectionRowHtml(section) {
+    const selected = section.id === selectedSection;
+    return `
+        <li class="row cursor-pointer focus-ring ${selected ? 'row-sel' : ''}" data-id="${section.id}" tabindex="0">
+            <span class="t-sm t-medium">${section.label}</span>
+        </li>
+    `;
+}
+
+function selectSection(id) {
+    selectedSection = id;
+    document.querySelectorAll('#rt-sections li[data-id]').forEach((li) => {
+        li.classList.toggle('row-sel', li.dataset.id === id);
+    });
+    const title = SECTIONS.find((s) => s.id === id);
+    setText('rt-section-title', title ? title.label : 'Runtime');
+    const main = document.getElementById('rt-main');
+    if (main) {
+        main.innerHTML = sectionContentHtml(id);
+    }
+    if (id === 'logs') {
+        bindPause();
+        startLogStream();
+    } else {
+        stopLogStream();
+    }
+    updateStatus();
+    updateMetrics();
+}
+
+function sectionContentHtml(id) {
+    if (id === 'engine') {
+        return wrap(engineHtml());
+    }
+    if (id === 'health') {
+        return wrap(healthHtml());
+    }
+    if (id === 'logs') {
+        return logsHtml();
+    }
+    return wrap(overviewHtml());
+}
+
+function wrap(inner) {
+    return `<div class="flex-1 overflow-y-auto scroll-thin p-6">${inner}</div>`;
+}
+
+function overviewHtml() {
+    return `
+        <div class="grid grid-cols-2 gap-4">
+            ${valCard('Uptime', '<span id="rt-uptime-val" class="t-lg t-num">—</span>', 'process uptime')}
+            ${dotCard('Process', 'rt-proc', 'healthz · readyz')}
+            ${dotCard('Database', 'rt-db', 'readiness probe')}
+            ${dotCard('Queue', 'rt-q', 'readiness probe')}
+        </div>
+    `;
+}
+
+function engineHtml() {
+    return `
+        <div class="t-xs text-tertiary mb-3">since process start</div>
+        <div class="grid grid-cols-2 gap-4">
+            ${numCard('Nodes executed', 'rt-nodes')}
+            ${numCard('Tool calls', 'rt-tools')}
+            ${numCard('LLM tokens', 'rt-tokens')}
+            ${numCard('Workflow duration avg', 'rt-wfdur')}
+        </div>
+    `;
+}
+
+function healthHtml() {
+    return `
+        <div class="card"><ul class="divide-bd">
+            ${healthRow('Database', 'sqlite', 'rt-health-db')}
+            ${healthRow('Job Queue', 'in-memory', 'rt-health-q')}
+        </ul></div>
+    `;
+}
+
+function logsHtml() {
+    return `
+        <div class="flex-1 min-h-0 flex flex-col p-6">
+            <div class="card flex-1 min-h-0 flex flex-col">
+                <div class="h-8 px-4 flex items-center justify-between bd-b shrink-0">
+                    <div class="flex items-center gap-2"><span class="dot dot-success"></span><span class="t-xs text-secondary">ring buffer · 实时 SSE</span></div>
+                    <button id="rt-log-pause" class="tab focus-ring">Pause</button>
+                </div>
+                <pre id="rt-log" class="term flex-1 min-h-0 px-4 py-3 overflow-y-auto scroll-thin m-0"></pre>
+            </div>
+        </div>
     `;
 }
 
@@ -132,10 +199,12 @@ function updateStatus() {
     const qReady = ready?.checks?.queue === true;
     const healthy = Boolean(health) && Boolean(ready) && ready.status === 'ready';
     const uptime = health?.uptime;
+    const overallDot = healthy ? 'dot-success' : (health ? 'dot-warning' : 'dot-error');
+    setDot('rt-nav-dot', overallDot);
+    setDot('rt-status-dot', overallDot);
+    setText('rt-status-text', healthy ? 'Healthy' : (health ? 'Degraded' : 'Down'));
     setText('rt-uptime', uptime == null ? 'uptime —' : `uptime ${formatUptime(uptime)}`);
     setText('rt-uptime-val', uptime == null ? '—' : formatUptime(uptime));
-    setDot('rt-status-dot', healthy ? 'dot-success' : (health ? 'dot-warning' : 'dot-error'));
-    setText('rt-status-text', healthy ? 'Healthy' : (health ? 'Degraded' : 'Down'));
     setDot('rt-proc-dot', health ? 'dot-success' : 'dot-error');
     setText('rt-proc-text', health ? 'Healthy' : 'Down');
     setReadyState('rt-db', dbReady);
@@ -159,13 +228,16 @@ function setHealthRow(idPrefix, ok) {
 }
 
 async function updateMetrics() {
+    if (selectedSection !== 'engine') {
+        return; // 仅 Engine 章节需要
+    }
     let metrics;
     try {
         metrics = (await api('/runtime/metrics')).data;
     } catch (_err) {
-        return; // 保留上次值
+        return;
     }
-    if (state.view !== 'runtime' || !metrics) {
+    if (state.view !== 'runtime' || selectedSection !== 'engine' || !metrics) {
         return;
     }
     setText('rt-nodes', fmtNum(metrics.nodesExecuted));
@@ -175,6 +247,7 @@ async function updateMetrics() {
 }
 
 function startLogStream() {
+    stopLogStream();
     const controller = new AbortController();
     logsAbort = controller;
     streamSse('/runtime/logs/stream', {
@@ -186,8 +259,15 @@ function startLogStream() {
     });
 }
 
+function stopLogStream() {
+    if (logsAbort) {
+        logsAbort.abort();
+        logsAbort = null;
+    }
+}
+
 function appendLog(entry) {
-    if (state.view !== 'runtime') {
+    if (state.view !== 'runtime' || selectedSection !== 'logs') {
         return;
     }
     const pre = document.getElementById('rt-log');
@@ -209,7 +289,11 @@ function appendLog(entry) {
 
 function bindPause() {
     const btn = document.getElementById('rt-log-pause');
-    btn?.addEventListener('click', () => {
+    if (!btn) {
+        return;
+    }
+    paused = false;
+    btn.addEventListener('click', () => {
         paused = !paused;
         btn.textContent = paused ? 'Resume' : 'Pause';
         btn.classList.toggle('is-active', paused);
