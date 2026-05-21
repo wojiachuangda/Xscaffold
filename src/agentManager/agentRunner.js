@@ -17,15 +17,18 @@ const DEFAULT_MAX_ITERATIONS = Number(process.env.AGENT_MAX_ITERATIONS) || 8;
  * @param {number} [params.maxIterations]
  * @returns {Promise<{ content, turns, tokenUsage, stopReason }>}
  */
-async function runAgentLoop({ agent, prompt, deps, ctx = {}, maxIterations = DEFAULT_MAX_ITERATIONS, onEvent }) {
+async function runAgentLoop({ agent, prompt, deps, ctx = {}, maxIterations, onEvent }) {
     const toolDefs = resolveAgentTools(agent, deps.toolRegistry);
     const openaiTools = toOpenAITools(toolDefs);
     const allowed = new Set(agent.tools || []);
     const messages = [systemMessage(agent), { role: 'user', content: prompt }];
+    // 运行参数从 agent 实体取（拉出原硬编码）：max_turns / temperature；显式 maxIterations 优先
+    const limit = maxIterations ?? agent.maxTurns ?? DEFAULT_MAX_ITERATIONS;
+    const temperature = agent.temperature ?? 0.7;
 
     const acc = { turns: [], tokenUsage: emptyUsage(), lastContent: '' };
-    for (let turnIndex = 0; turnIndex < maxIterations; turnIndex += 1) {
-        const result = await deps.llmClient.chat({ model: agent.model, messages, tools: openaiTools });
+    for (let turnIndex = 0; turnIndex < limit; turnIndex += 1) {
+        const result = await deps.llmClient.chat({ model: agent.model, messages, tools: openaiTools, temperature });
         accumulateUsage(acc.tokenUsage, result.tokenUsage);
         acc.lastContent = result.content || acc.lastContent;
 
@@ -61,6 +64,10 @@ function resolveAgentTools(agent, toolRegistry) {
 }
 
 function systemMessage(agent) {
+    // agent.systemPrompt 有则用（角色人设拉出硬编码）；否则回退到原生成模板
+    if (agent.systemPrompt) {
+        return { role: 'system', content: agent.systemPrompt };
+    }
     const persona = agent.description ? `${agent.name}: ${agent.description}` : agent.name;
     return {
         role: 'system',

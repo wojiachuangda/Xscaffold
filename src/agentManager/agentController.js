@@ -11,6 +11,7 @@ const { openSseStream } = require('../apiGateway/sse');
 const { logger } = require('../observability/logger');
 const { CreateAgentSchema, UpdateAgentSchema, ListAgentsFilterSchema } = require('./agentSchema');
 const { runAgentLoop, newInvocationId } = require('./agentRunner');
+const { ownerIdOf } = require('../identity/currentUser');
 
 const IdParamSchema = z.object({ id: z.string().min(1).max(64) });
 
@@ -30,7 +31,7 @@ function mountInvokeRoute(router, service, invokeDeps) {
         '/:id/invoke',
         validate({ params: IdParamSchema, body: InvokeAgentSchema }),
         asyncHandler(async (req, res) => {
-            const agent = await service.getAgentById(req.params.id);
+            const agent = await service.getAgentById(req.params.id, ownerIdOf(req));
             const ctx = { executionId: newInvocationId(), sessionId: req.body.sessionId };
             const result = await runAgentLoop({ agent, prompt: req.body.prompt, deps: invokeDeps, ctx });
             res.json(success(result));
@@ -51,7 +52,7 @@ function mountInvokeStreamRoute(router, service, invokeDeps) {
  * getAgentById 在开流前——agent 不存在仍走全局 errorHandler 的 JSON 404。
  */
 async function runInvokeStream(req, res, service, invokeDeps) {
-    const agent = await service.getAgentById(req.params.id);
+    const agent = await service.getAgentById(req.params.id, ownerIdOf(req));
     const ctx = { executionId: newInvocationId(), sessionId: req.body.sessionId };
     const stream = openSseStream(res);
     try {
@@ -121,7 +122,7 @@ function buildRouter(service, invokeDeps = {}) {
         '/',
         validate({ body: CreateAgentSchema }),
         asyncHandler(async (req, res) => {
-            const agent = await service.createAgent(req.body);
+            const agent = await service.createAgent(req.body, ownerIdOf(req));
             res.status(201).json(success(agent));
         }),
     );
@@ -130,7 +131,7 @@ function buildRouter(service, invokeDeps = {}) {
         '/',
         validate({ query: ListAgentsFilterSchema }),
         asyncHandler(async (req, res) => {
-            const { items, total } = await service.listAgents(req.query);
+            const { items, total } = await service.listAgents(req.query, ownerIdOf(req));
             res.json(success(items, { total, limit: req.query.limit, offset: req.query.offset }));
         }),
     );
@@ -139,7 +140,7 @@ function buildRouter(service, invokeDeps = {}) {
         '/:id',
         validate({ params: IdParamSchema }),
         asyncHandler(async (req, res) => {
-            res.json(success(await service.getAgentById(req.params.id)));
+            res.json(success(await service.getAgentById(req.params.id, ownerIdOf(req))));
         }),
     );
 
@@ -147,7 +148,7 @@ function buildRouter(service, invokeDeps = {}) {
         '/:id',
         validate({ params: IdParamSchema, body: UpdateAgentSchema }),
         asyncHandler(async (req, res) => {
-            res.json(success(await service.updateAgent(req.params.id, req.body)));
+            res.json(success(await service.updateAgent(req.params.id, req.body, ownerIdOf(req))));
         }),
     );
 
@@ -155,7 +156,7 @@ function buildRouter(service, invokeDeps = {}) {
         '/:id',
         validate({ params: IdParamSchema }),
         asyncHandler(async (req, res) => {
-            res.json(success(await service.deleteAgent(req.params.id)));
+            res.json(success(await service.deleteAgent(req.params.id, ownerIdOf(req))));
         }),
     );
 

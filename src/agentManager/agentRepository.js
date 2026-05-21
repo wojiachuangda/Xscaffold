@@ -18,6 +18,10 @@ function rowToEntity(row) {
         model: row.model,
         tools: JSON.parse(row.tools || '[]'),
         status: row.status,
+        ownerId: row.owner_id,
+        systemPrompt: row.system_prompt ?? null,
+        temperature: row.temperature,
+        maxTurns: row.max_turns,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     };
@@ -61,6 +65,10 @@ function buildWhere(filter) {
         where.push('name LIKE ?');
         params.push(`%${filter.name}%`);
     }
+    if (filter.ownerId) {
+        where.push('owner_id = ?');
+        params.push(filter.ownerId);
+    }
     return { whereSql: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
 }
 
@@ -82,8 +90,8 @@ async function findAll(driver, filter = {}) {
 async function insertAgent(driver, id, input, ts) {
     assertValidStatus(input.status ?? 'enabled');
     await driver.run(
-        `INSERT INTO agents (id, name, description, model, tools, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO agents (id, name, description, model, tools, status, owner_id, system_prompt, temperature, max_turns, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
             id,
             input.name,
@@ -91,6 +99,11 @@ async function insertAgent(driver, id, input, ts) {
             input.model,
             JSON.stringify(input.tools ?? []),
             input.status ?? 'enabled',
+            // 内部调用（workflow agent 节点等）可不传 ownerId → 落到 dev 默认归属，与迁移 009 列默认值一致
+            input.ownerId ?? 'user_dev_default',
+            input.systemPrompt ?? null,
+            input.temperature ?? 0.7,
+            input.maxTurns ?? 8,
             ts,
             ts,
         ],
@@ -114,9 +127,21 @@ async function create(driver, input) {
 async function updateAgentRow(driver, id, next) {
     assertValidStatus(next.status);
     await driver.run(
-        `UPDATE agents SET name = ?, description = ?, model = ?, tools = ?, status = ?, updated_at = ?
+        `UPDATE agents SET name = ?, description = ?, model = ?, tools = ?, status = ?,
+            system_prompt = ?, temperature = ?, max_turns = ?, updated_at = ?
          WHERE id = ?`,
-        [next.name, next.description ?? null, next.model, JSON.stringify(next.tools ?? []), next.status, nowIso(), id],
+        [
+            next.name,
+            next.description ?? null,
+            next.model,
+            JSON.stringify(next.tools ?? []),
+            next.status,
+            next.systemPrompt ?? null,
+            next.temperature ?? 0.7,
+            next.maxTurns ?? 8,
+            nowIso(),
+            id,
+        ],
     );
 }
 

@@ -87,6 +87,7 @@ describe('AgentSchema (完整实体)', () => {
             model: 'm',
             tools: [],
             status: 'enabled',
+            ownerId: 'user_dev_default',
             createdAt: now,
             updatedAt: now,
         });
@@ -94,7 +95,13 @@ describe('AgentSchema (完整实体)', () => {
     });
 
     test('description 可空', () => {
-        const r = AgentSchema.parse({ id: 'a1', name: 'a', model: 'm', description: null });
+        const r = AgentSchema.parse({
+            id: 'a1',
+            name: 'a',
+            model: 'm',
+            ownerId: 'user_dev_default',
+            description: null,
+        });
         expect(r.description).toBeNull();
     });
 });

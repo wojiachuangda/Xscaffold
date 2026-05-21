@@ -134,6 +134,34 @@ describe('agentRunner.runAgentLoop', () => {
         expect(result.turns).toHaveLength(1);
     });
 
+    test('agent.systemPrompt/temperature/maxTurns 被透传到 chat 与循环上限', async () => {
+        const calls = [];
+        const looping = {
+            chat: (args) => {
+                calls.push(args);
+                return Promise.resolve({
+                    content: null,
+                    reasoning_content: null,
+                    toolCalls: [{ id: 'c', name: 'echo', arguments: { msg: 'x' } }],
+                    tokenUsage: { prompt: 1, completion: 1, total: 2, cached_prompt_tokens: 0 },
+                    latencyMs: 1,
+                });
+            },
+        };
+        const agent = { ...AGENT, systemPrompt: '你是审计助手', temperature: 0.2, maxTurns: 2 };
+        const result = await runAgentLoop({
+            agent,
+            prompt: 'go',
+            deps: { llmClient: looping, toolRegistry: buildRegistry() },
+        });
+
+        expect(result.stopReason).toBe('max_iterations');
+        expect(calls).toHaveLength(2); // maxTurns=2 封顶
+        expect(calls[0].temperature).toBe(0.2);
+        const systemMsg = calls[0].messages.find((m) => m.role === 'system');
+        expect(systemMsg.content).toBe('你是审计助手');
+    });
+
     test('LLM 返回 reasoning_content → 下一轮 assistant turn 透传（DeepSeek 协议）', async () => {
         const calls = [];
         const responses = [

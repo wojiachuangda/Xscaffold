@@ -12,32 +12,35 @@ function buildService(repository) {
         throw new Error('agentService 需要注入 repository');
     }
 
-    async function createAgent(input) {
+    // ownerId：多租户归属。controller 传当前用户；内部调用（如 workflow agent 节点）可不传 → 不做 owner 隔离
+    async function createAgent(input, ownerId) {
         const parsed = parseOrThrow(CreateAgentSchema, input);
-        return await repository.create(parsed);
+        return await repository.create({ ...parsed, ownerId });
     }
 
-    async function updateAgent(id, patch) {
+    async function updateAgent(id, patch, ownerId) {
         const parsed = parseOrThrow(UpdateAgentSchema, patch);
+        await getAgentById(id, ownerId); // owner 不符 → 404
         return await repository.update(id, parsed);
     }
 
-    async function deleteAgent(id) {
+    async function deleteAgent(id, ownerId) {
+        await getAgentById(id, ownerId); // owner 不符 → 404
         await repository.remove(id);
         return { id };
     }
 
-    async function getAgentById(id) {
+    async function getAgentById(id, ownerId) {
         const agent = await repository.findById(id);
-        if (!agent) {
-            throw new NotFoundError(`Agent 不存在: ${id}`);
+        if (!agent || (ownerId && agent.ownerId !== ownerId)) {
+            throw new NotFoundError(`Agent 不存在: ${id}`); // 跨用户不泄漏存在性
         }
         return agent;
     }
 
-    async function listAgents(filter = {}) {
+    async function listAgents(filter = {}, ownerId) {
         const parsed = parseOrThrow(ListAgentsFilterSchema, filter);
-        return await repository.findAll(parsed);
+        return await repository.findAll({ ...parsed, ownerId });
     }
 
     return { createAgent, updateAgent, deleteAgent, getAgentById, listAgents };

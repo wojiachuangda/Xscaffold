@@ -59,6 +59,7 @@ describe('updateAgent', () => {
 
     test('合法 patch → 调用 repo.update', async () => {
         const repo = mockRepo();
+        repo.findById.mockResolvedValue({ id: 'a', ownerId: 'user_dev_default' }); // 先经 getAgentById 存在性/owner 校验
         repo.update.mockResolvedValue({ id: 'a', status: 'disabled' });
         const svc = buildService(repo);
         await svc.updateAgent('a', { status: 'disabled' });
@@ -69,6 +70,7 @@ describe('updateAgent', () => {
 describe('deleteAgent', () => {
     test('调用 repo.remove 并返回 id', async () => {
         const repo = mockRepo();
+        repo.findById.mockResolvedValue({ id: 'x', ownerId: 'user_dev_default' }); // 先经 getAgentById 存在性/owner 校验
         repo.remove.mockResolvedValue(true);
         const svc = buildService(repo);
         expect(await svc.deleteAgent('x')).toEqual({ id: 'x' });

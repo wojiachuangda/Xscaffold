@@ -17,6 +17,9 @@ const BEARER_PATTERN = /^Bearer\s+(.+)$/i;
 function createAuthMiddleware(options) {
     const config = resolveConfig(options);
     return (req, res, next) => {
+        if (req.user) {
+            return next(); // 上游 apiKeyMiddleware 已解析出用户 → 跳过 JWT
+        }
         if (config.disabled || isExempt(req.path, config.exemptPaths)) {
             return next();
         }

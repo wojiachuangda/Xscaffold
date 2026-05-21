@@ -7,6 +7,7 @@ const express = require('express');
 
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
 const { createAuthMiddleware } = require('./middlewares/authMiddleware');
+const { createApiKeyMiddleware } = require('./middlewares/apiKeyMiddleware');
 const { createRateLimiter } = require('./middlewares/rateLimiter');
 const { success } = require('./response/envelope');
 const { logger } = require('../observability/logger');
@@ -29,6 +30,9 @@ const { createNodeRunner } = require('../workflowEngine/nodeRunner');
 const { createWorkflowExecutor } = require('../workflowEngine/workflowExecutor');
 const { createRegistry } = require('../toolRegistry/toolRegistry');
 const { registerBuiltins } = require('../toolRegistry/builtinTools');
+
+const { buildUserRepository } = require('../identity/userRepository');
+const { buildApiKeyRepository } = require('../identity/apiKeyRepository');
 
 const { buildMemoryRepository } = require('../memoryManager/memoryRepository');
 const { buildMemoryStore } = require('../memoryManager/memoryStore');
@@ -67,6 +71,8 @@ function createApp(overrides = {}) {
 function buildDependencies(overrides) {
     const agentService =
         overrides.agentService || buildService(overrides.agentRepository || buildRepository(overrides.db));
+    const userRepository = overrides.userRepository || buildUserRepository(overrides.db);
+    const apiKeyRepository = overrides.apiKeyRepository || buildApiKeyRepository(overrides.db);
     const toolRegistry = overrides.toolRegistry || buildToolRegistry();
     const llmClient = resolveLLMClient(overrides);
     const memoryStore = overrides.memoryStore || buildMemoryStore(buildMemoryRepository(overrides.db));
@@ -90,6 +96,8 @@ function buildDependencies(overrides) {
         });
     return {
         agentService,
+        userRepository,
+        apiKeyRepository,
         projectAssistantService,
         workflowRegistry,
         executionStore,
@@ -271,9 +279,13 @@ function mountProtectedRoutes(app, deps, overrides) {
             secret: overrides.jwtSecret || process.env.JWT_SECRET,
             disabled: overrides.authDisabled,
         });
+    const apiKeyMiddleware =
+        overrides.apiKeyMiddleware ||
+        createApiKeyMiddleware({ userRepository: deps.userRepository, apiKeyRepository: deps.apiKeyRepository });
     const rateLimit = overrides.rateLimiter || createRateLimiter({ bypass: overrides.rateLimitBypass ?? true });
 
     app.use(express.json({ limit: '1mb' }));
+    app.use(apiKeyMiddleware); // 先解析 X-API-Key → req.user；无 key 放行给 JWT/AUTH_DISABLED
     app.use(authMiddleware);
     app.use(rateLimit);
 
