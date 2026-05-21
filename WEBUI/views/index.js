@@ -8,7 +8,7 @@ import { renderAutomation } from './automation.js';
 import { renderExecutions } from './executions.js';
 import { renderInbox } from './inbox.js';
 import { renderRuntime } from './runtime.js';
-import { renderSessions } from './sessions.js';
+import { renderSessions } from './sessions/index.js';
 import { renderSettings } from './settings.js';
 
 const RENDERERS = {
