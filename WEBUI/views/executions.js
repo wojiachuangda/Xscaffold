@@ -21,13 +21,13 @@ const STATUS_TONE = {
 export async function fetchExecutions() {
     const params = buildQuery();
     const payload = await api(`/workflows/executions?${params.toString()}`);
-    state.executions = payload.data || [];
-    state.executionsTotal = payload.meta?.total ?? state.executions.length;
+    state.executionsPage = payload.data || [];
+    state.executionsPageTotal = payload.meta?.total ?? state.executionsPage.length;
 }
 
 export function renderExecutions() {
     paint();
-    // 进入视图即拉一次分页数据：executionsTotal 仅 fetchExecutions 会设置，
+    // 进入视图即拉一次分页数据：executionsPageTotal 仅 fetchExecutions 会设置，
     // 否则首屏停在 0，Prev/Next 永远 disabled。
     reloadAndRender();
 }
@@ -54,7 +54,7 @@ function buildQuery() {
 }
 
 function describeRange() {
-    const total = state.executionsTotal;
+    const total = state.executionsPageTotal;
     if (!total) {
         return '0 executions';
     }
@@ -64,10 +64,10 @@ function describeRange() {
 }
 
 function pickSelected() {
-    if (!state.executions || state.executions.length === 0) {
+    if (!state.executionsPage || state.executionsPage.length === 0) {
         return null;
     }
-    return state.executions.find((e) => e.id === state.selectedId) || state.executions[0];
+    return state.executionsPage.find((e) => e.id === state.selectedId) || state.executionsPage[0];
 }
 
 function shellHtml() {
@@ -86,7 +86,7 @@ function shellHtml() {
             <div class="px-4 py-2 bd-t flex items-center justify-between t-xs">
                 <button id="ex-prev" class="btn btn-secondary focus-ring" ${state.executionsOffset <= 0 ? 'disabled' : ''}>Prev</button>
                 <span class="text-tertiary">${describeRange()}</span>
-                <button id="ex-next" class="btn btn-secondary focus-ring" ${state.executionsOffset + state.executionsLimit >= state.executionsTotal ? 'disabled' : ''}>Next</button>
+                <button id="ex-next" class="btn btn-secondary focus-ring" ${state.executionsOffset + state.executionsLimit >= state.executionsPageTotal ? 'disabled' : ''}>Next</button>
             </div>
         </aside>
         <main class="flex-1 overflow-hidden flex flex-col">
@@ -112,7 +112,7 @@ function filterControlsHtml() {
 
 function renderList() {
     const ul = document.getElementById('ex-list');
-    const items = state.executions || [];
+    const items = state.executionsPage || [];
     if (items.length === 0) {
         ul.innerHTML = '<li class="empty">No executions</li>';
         return;

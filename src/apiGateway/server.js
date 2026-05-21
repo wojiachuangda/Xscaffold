@@ -59,6 +59,9 @@ function createApp(overrides = {}) {
     return app;
 }
 
+// 扁平 DI 装配：每个 overrides.X || buildY() 贡献一个分支，complexity 偏高是装配函数的固有形态；
+// 拆 sub-builder 反而割裂依赖全景、增加跳转成本，故显式豁免而非硬拆。
+// eslint-disable-next-line complexity
 function buildDependencies(overrides) {
     const agentService =
         overrides.agentService || buildService(overrides.agentRepository || buildRepository(overrides.db));

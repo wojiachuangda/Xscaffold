@@ -39,28 +39,16 @@ async function findById(driver, id) {
 
 async function insertRecord(driver, record) {
     const id = generateId();
+    // 复用 recordToParams（批插同款映射）：补 id、去掉末尾 created_at（单插由 DB 默认）。
+    // 单插/批插自此共享同一列映射，complexity 也回落到装配级。
+    const params = recordToParams({ ...record, id }).slice(0, -1);
     await driver.run(
         `INSERT INTO ioor_records
          (id, execution_id, node_id, turn_index, agent_id, profile_hash,
           model_provider, model_name, input, output, tool_calls, observations,
           token_usage, latency_ms)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-            id,
-            record.executionId,
-            record.nodeId,
-            record.turnIndex,
-            record.agentId ?? null,
-            record.profileHash ?? null,
-            record.modelProvider ?? null,
-            record.modelName ?? null,
-            record.input ? JSON.stringify(record.input) : null,
-            record.output ? JSON.stringify(record.output) : null,
-            JSON.stringify(record.toolCalls || []),
-            JSON.stringify(record.observations || []),
-            record.tokenUsage ? JSON.stringify(record.tokenUsage) : null,
-            record.latencyMs ?? null,
-        ],
+        params,
     );
     return findById(driver, id);
 }

@@ -16,8 +16,11 @@ export const state = {
     selectedId: null,
     runtime: { health: null, ready: null },
     workflows: [],
+    // 共享 feed：loadProtectedData 喂（limit=80），inbox 派生 issues / automation 近况 / actions 快照读取
     executions: [],
-    executionsTotal: 0,
+    // executions 视图的分页结果——独立 slice，避免覆盖上面的共享 feed
+    executionsPage: [],
+    executionsPageTotal: 0,
     executionsFilter: { status: 'ALL', workflowId: '' },
     executionsOffset: 0,
     executionsLimit: 50,
