@@ -4,6 +4,7 @@
 const fs = require('fs/promises');
 const http = require('http');
 const path = require('path');
+const { Readable } = require('node:stream');
 
 const HOST = process.env.WEBUI_HOST || '127.0.0.1';
 const PORT = Number(process.env.WEBUI_PORT) || 5173;
@@ -13,6 +14,7 @@ const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
     '.css': 'text/css; charset=utf-8',
     '.js': 'text/javascript; charset=utf-8',
+    '.mjs': 'text/javascript; charset=utf-8',
     '.json': 'application/json; charset=utf-8',
     '.svg': 'image/svg+xml',
 };
@@ -51,9 +53,16 @@ async function proxyApi(req, res, requestUrl) {
         headers: buildProxyHeaders(req.headers),
         body: await readBody(req),
     });
-    const body = Buffer.from(await response.arrayBuffer());
+    // 不再 buffer 整包 —— SSE / text/event-stream 必须 chunk 透传给浏览器，
+    // 否则 V2.2 流式 invoke 在代理这里被攒成同步响应。Readable.fromWeb 把 undici
+    // 的 web ReadableStream 转成 Node Readable，pipe 到 res；对非流式响应等价于
+    // 「分块写完后 end」，与原 buffer+end 行为一致。
     res.writeHead(response.status, Object.fromEntries(response.headers));
-    res.end(body);
+    if (!response.body) {
+        res.end();
+        return;
+    }
+    Readable.fromWeb(response.body).pipe(res);
 }
 
 function buildBackendUrl(requestUrl) {

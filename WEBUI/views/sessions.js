@@ -1,8 +1,10 @@
 // [ui] ID: WEBUI-V2-SESSIONS | Date: 2026-05-21 | Description: Sessions view — per-agent invocation log; localStorage-backed structured cells (prompt/turns/answer)
 'use strict';
 
-import { api } from '../lib/api.js';
 import { els } from '../lib/dom.js';
+import { renderMarkdown } from '../lib/markdown.js';
+import { openModal } from '../lib/modal.js';
+import { streamSse } from '../lib/sseClient.js';
 import { state } from '../lib/state.js';
 import { escapeHtml, formatTime, showToast } from '../lib/utils.js';
 
@@ -111,7 +113,7 @@ function shellHtml(sessions, agents) {
             <div class="px-4 py-2 bd-t t-xs text-tertiary">${sessions.length} sessions · local</div>
         </aside>
         <main class="flex-1 overflow-hidden flex flex-col">
-            <div id="se-detail" class="flex-1 flex flex-col overflow-hidden"></div>
+            <div id="se-detail" class="flex-1 min-h-0 flex flex-col overflow-hidden"></div>
         </main>
     `;
 }
@@ -174,12 +176,12 @@ function detailHtml(session, cells) {
             </div>
             <button id="se-delete" class="btn btn-danger focus-ring">Delete</button>
         </header>
-        <div id="se-cells" class="flex-1 overflow-y-auto scroll-thin px-6 py-6 flex flex-col gap-4">${body}</div>
+        <div id="se-cells" class="flex-1 min-h-0 overflow-y-auto scroll-thin px-6 py-6 flex flex-col gap-4">${body}</div>
         <div class="bd-t p-4 bg-panel shrink-0">
             <textarea id="se-prompt" class="input-area" rows="3" placeholder="给 ${escapeHtml(session.agentName)} 一条指令…"></textarea>
             <div class="flex items-center gap-2 mt-2">
                 <button id="se-send" class="btn btn-primary focus-ring">Send</button>
-                <span id="se-hint" class="t-xs text-tertiary">每条 prompt 独立 invoke（无自动续话）</span>
+                <span id="se-hint" class="t-xs text-tertiary">Enter 发送 · Shift+Enter 换行 · 无自动续话</span>
             </div>
         </div>
     `;
@@ -187,10 +189,15 @@ function detailHtml(session, cells) {
 
 function cellHtml(cell, index) {
     return `
-        <div class="card">
+        <div class="card shrink-0">
             <div class="h-8 px-4 flex items-center justify-between bd-b">
                 <span class="t-sm t-medium">Cell ${index + 1}</span>
-                <span class="t-xs text-tertiary t-num">${escapeHtml(formatTime(cell.invokedAt))}</span>
+                <div class="flex items-center gap-2">
+                    <button data-action="view-json" data-cell-index="${index}" class="btn btn-ghost btn-icon focus-ring" title="View JSON 原文">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                    </button>
+                    <span class="t-xs text-tertiary t-num">${escapeHtml(formatTime(cell.invokedAt))}</span>
+                </div>
             </div>
             <div class="p-4">
                 <div class="t-xs t-upper t-medium text-tertiary mb-1">Prompt</div>
@@ -203,9 +210,12 @@ function cellHtml(cell, index) {
 
 function resultBlock(cell) {
     const turns = (cell.turns || []).map(turnHtml).join('');
+    const contentHtml = cell.content
+        ? `<div class="md-body">${renderMarkdown(cell.content)}</div>`
+        : '<span class="text-tertiary">(empty)</span>';
     return `
         <ol class="flex flex-col gap-2">${turns}</ol>
-        <div class="bg-soft bd rounded p-3 mt-3 t-sm">${escapeHtml(cell.content || '(empty)')}</div>
+        <div class="bg-soft bd rounded p-3 mt-3 t-sm">${contentHtml}</div>
         <div class="t-xs text-tertiary mt-2">stop: ${escapeHtml(cell.stopReason || '—')} · turns: ${(cell.turns || []).length} · tokens: ${cell.tokenUsage?.total ?? 0}</div>
     `;
 }
@@ -215,7 +225,7 @@ function turnHtml(turn) {
         return `
             <li class="tl">
                 <span class="tl-dot dot-success"></span>
-                <div class="t-sm">turn ${turn.turnIndex} · final answer</div>
+                <div class="t-sm">turn ${turn.turnIndex} · final</div>
             </li>
         `;
     }
@@ -227,10 +237,16 @@ function turnHtml(turn) {
             return `<div class="t-xs ${ok ? 'text-success' : 'text-error'} t-mono">→ ${escapeHtml(tc.name)} · ${detail}</div>`;
         })
         .join('');
+    // 带 tool calls 的 turn 同时也可能有 LLM 解释文字（调工具前 / 后的 reasoning）。
+    // 不显示就直接吞了——这正是 demo-001 cell 里「好的，我先来全面了解一下…」消失的原因。
+    const planning = turn.content
+        ? `<div class="md-body t-sm mt-1 text-secondary">${renderMarkdown(turn.content)}</div>`
+        : '';
     return `
         <li class="tl">
             <span class="tl-dot dot-neutral"></span>
             <div class="t-sm">turn ${turn.turnIndex} · ${turn.toolCalls.length} tool call(s)</div>
+            ${planning}
             <div class="mt-1 flex flex-col gap-1">${calls}</div>
         </li>
     `;
@@ -260,6 +276,18 @@ function bindDetail(session) {
     const sendBtn = document.getElementById('se-send');
     const promptEl = document.getElementById('se-prompt');
     sendBtn?.addEventListener('click', () => sendPrompt(session, sendBtn, promptEl));
+    promptEl?.addEventListener('keydown', (event) => {
+        // Enter 发送；Shift+Enter 走 textarea 默认换行；IME 候选词确认时
+        // event.isComposing=true，跳过避免把候选词当成发送指令。
+        if (event.key !== 'Enter' || event.shiftKey || event.isComposing) {
+            return;
+        }
+        event.preventDefault();
+        if (sendBtn?.disabled) {
+            return;
+        }
+        sendPrompt(session, sendBtn, promptEl);
+    });
     document.getElementById('se-delete')?.addEventListener('click', () => {
         if (!confirm(`删除 session「${session.topic}」?`)) {
             return;
@@ -273,6 +301,33 @@ function bindDetail(session) {
         renameSession(session.id, topicEl.value.trim() || 'Untitled session');
         renderSessions();
     });
+    bindCellsContainer();
+}
+
+function bindCellsContainer() {
+    const container = document.getElementById('se-cells');
+    if (!container) {
+        return;
+    }
+    container.addEventListener('click', handleCellAction);
+}
+
+function handleCellAction(event) {
+    const btn = event.target.closest('button[data-action="view-json"]');
+    if (!btn) {
+        return;
+    }
+    const cellIndex = Number(btn.dataset.cellIndex);
+    const cells = loadCells(state.selectedId);
+    const cell = cells[cellIndex];
+    if (!cell) {
+        return;
+    }
+    openModal(
+        `Cell ${cellIndex + 1} · ${state.selectedId}`,
+        `${(cell.turns || []).length} turns · ${cell.tokenUsage?.total ?? 0} tokens · ${cell.stopReason ?? '—'}`,
+        JSON.stringify(cell, null, 2),
+    );
 }
 
 async function sendPrompt(session, sendBtn, promptEl) {
@@ -281,22 +336,166 @@ async function sendPrompt(session, sendBtn, promptEl) {
         showToast('请输入指令');
         return;
     }
+    const streamingSessionId = session.id;
+    const cellIndex = loadCells(streamingSessionId).length + 1;
+    const cell = createPendingCell(prompt);
+
     setBusy(sendBtn, true);
-    const cell = { prompt, invokedAt: new Date().toISOString(), turns: [], content: '', stopReason: null, tokenUsage: null, error: null };
-    try {
-        const payload = await api(`/agents/${session.agentId}/invoke`, { method: 'POST', body: { prompt, sessionId: session.id } });
-        const data = payload.data || {};
-        cell.turns = data.turns || [];
-        cell.content = data.content || '';
-        cell.stopReason = data.stopReason || null;
-        cell.tokenUsage = data.tokenUsage || null;
-    } catch (err) {
-        cell.error = err.message || 'invoke failed';
+    if (promptEl) {
+        promptEl.value = '';
     }
-    if (!appendCell(session.id, cell)) {
+    appendLiveCellDom(streamingSessionId, cell, cellIndex);
+
+    try {
+        await streamSse(`/agents/${session.agentId}/invoke/stream`, {
+            body: { prompt, sessionId: streamingSessionId },
+            handlers: {
+                onTurn: (event) => handleTurn(cell, streamingSessionId, event),
+                onDone: (event) => handleDone(cell, event),
+                onError: (event) => {
+                    cell.error = event.message;
+                },
+            },
+        });
+    } catch (err) {
+        cell.error = err.message || 'stream failed';
+    }
+
+    if (!appendCell(streamingSessionId, cell)) {
         showToast('localStorage 写入失败（可能已满），本次结果未保存');
     }
-    renderSessions();
+    finalizeLiveCellDom(streamingSessionId, cell, cellIndex);
+    setBusy(sendBtn, false);
+}
+
+function createPendingCell(prompt) {
+    return {
+        prompt,
+        invokedAt: new Date().toISOString(),
+        turns: [],
+        content: '',
+        stopReason: null,
+        tokenUsage: null,
+        error: null,
+    };
+}
+
+function handleTurn(cell, sessionId, event) {
+    const turn = {
+        turnIndex: event.turnIndex,
+        content: event.content,
+        toolCalls: event.toolCalls,
+        observations: event.observations,
+    };
+    cell.turns.push(turn);
+    appendTurnRowDom(sessionId, turn);
+}
+
+function handleDone(cell, event) {
+    cell.content = event.content;
+    cell.stopReason = event.stopReason;
+    cell.tokenUsage = event.tokenUsage;
+}
+
+function appendLiveCellDom(sessionId, cell, cellIndex) {
+    if (state.selectedId !== sessionId) {
+        return;
+    }
+    const container = document.getElementById('se-cells');
+    if (!container) {
+        return;
+    }
+    const empty = container.querySelector('.empty');
+    if (empty) {
+        empty.remove();
+    }
+    container.insertAdjacentHTML('beforeend', liveCellHtml(cell, cellIndex));
+    container.scrollTop = container.scrollHeight;
+}
+
+function liveCellHtml(cell, cellIndex) {
+    return `
+        <div id="se-live-cell" class="card is-live shrink-0">
+            <div class="h-8 px-4 flex items-center justify-between bd-b">
+                <span class="t-sm t-medium">Cell ${cellIndex}</span>
+                <span class="t-xs text-tertiary t-num">${escapeHtml(formatTime(cell.invokedAt))}</span>
+            </div>
+            <div class="p-4">
+                <div class="t-xs t-upper t-medium text-tertiary mb-1">Prompt</div>
+                <div class="t-sm mb-3">${escapeHtml(cell.prompt)}</div>
+                <ol id="se-live-turns" class="flex flex-col gap-2"></ol>
+                <div id="se-live-status" class="t-xs text-tertiary mt-2">agent thinking…</div>
+            </div>
+        </div>
+    `;
+}
+
+function appendTurnRowDom(sessionId, turn) {
+    if (state.selectedId !== sessionId) {
+        return;
+    }
+    const list = document.getElementById('se-live-turns');
+    if (!list) {
+        return;
+    }
+    list.insertAdjacentHTML('beforeend', turnHtml(turn));
+    const container = document.getElementById('se-cells');
+    if (container) {
+        container.scrollTop = container.scrollHeight;
+    }
+}
+
+function finalizeLiveCellDom(sessionId, cell, cellIndex) {
+    if (state.selectedId !== sessionId) {
+        return;
+    }
+    const liveCell = document.getElementById('se-live-cell');
+    if (liveCell) {
+        liveCell.outerHTML = cellHtml(cell, cellIndex - 1);
+    } else {
+        // 流式期间用户切走过 view —— live cell DOM 已被 viewBody.innerHTML 销毁。
+        // 走 renderDetail 完整重渲染右侧，让 header 计数 + cell 列表全部从最新
+        // localStorage 重建。prompt 输入区被刷为空（sendPrompt 已清空，损失为零）。
+        const session = loadSessionList().find((s) => s.id === sessionId);
+        if (session) {
+            renderDetail(session);
+        }
+    }
+    refreshSessionRow(sessionId);
+    refreshDetailHeaderCount(sessionId);
+    // Markdown finalize 后高度可能比 live cell 大，重新滚一次确保新 cell 可见
+    const container = document.getElementById('se-cells');
+    if (container) {
+        container.scrollTop = container.scrollHeight;
+    }
+}
+
+function refreshDetailHeaderCount(sessionId) {
+    const count = loadCells(sessionId).length;
+    const header = document.querySelector('#se-detail header');
+    if (!header) {
+        return;
+    }
+    const spans = header.querySelectorAll('span.t-xs.text-secondary');
+    const cellsSpan = Array.from(spans).find((span) => /cells/u.test(span.textContent || ''));
+    if (cellsSpan) {
+        cellsSpan.textContent = `${count} cells`;
+    }
+}
+
+function refreshSessionRow(sessionId) {
+    const session = loadSessionList().find((s) => s.id === sessionId);
+    if (!session) {
+        return;
+    }
+    const row = document.querySelector(`#se-list li[data-id="${sessionId}"]`);
+    if (!row) {
+        return;
+    }
+    const span = row.querySelector('.t-xs.text-tertiary.shrink-0');
+    if (span) {
+        span.textContent = `${session.cellCount} cells`;
+    }
 }
 
 function setBusy(sendBtn, busy) {
@@ -305,7 +504,9 @@ function setBusy(sendBtn, busy) {
         sendBtn.textContent = busy ? 'Running…' : 'Send';
     }
     const hint = document.getElementById('se-hint');
-    if (hint && busy) {
-        hint.textContent = 'agent thinking…（可能数秒到数十秒）';
+    if (hint) {
+        hint.textContent = busy
+            ? 'agent thinking…（可能数秒到数十秒）'
+            : 'Enter 发送 · Shift+Enter 换行 · 无自动续话';
     }
 }
