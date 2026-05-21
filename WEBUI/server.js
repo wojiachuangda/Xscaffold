@@ -62,7 +62,12 @@ async function proxyApi(req, res, requestUrl) {
         res.end();
         return;
     }
-    Readable.fromWeb(response.body).pipe(res);
+    // SSE 长连接：上游出错不能让代理裸崩；客户端关页签要顺带 destroy 上游，
+    // 否则 undici 的 ReadableStream 读取悬挂、底层 socket 泄漏。
+    const upstream = Readable.fromWeb(response.body);
+    upstream.on('error', () => res.destroy());
+    res.on('close', () => upstream.destroy());
+    upstream.pipe(res);
 }
 
 function buildBackendUrl(requestUrl) {

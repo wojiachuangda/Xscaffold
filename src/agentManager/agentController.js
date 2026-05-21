@@ -8,6 +8,7 @@ const { validate } = require('../apiGateway/middlewares/validateMiddleware');
 const { asyncHandler } = require('../apiGateway/middlewares/asyncHandler');
 const { success } = require('../apiGateway/response/envelope');
 const { openSseStream } = require('../apiGateway/sse');
+const { logger } = require('../observability/logger');
 const { CreateAgentSchema, UpdateAgentSchema, ListAgentsFilterSchema } = require('./agentSchema');
 const { runAgentLoop, newInvocationId } = require('./agentRunner');
 
@@ -64,6 +65,8 @@ async function runInvokeStream(req, res, service, invokeDeps) {
         });
         stream.send(buildDoneEvent(result));
     } catch (err) {
+        // 流式 invoke 出错时全局 JSON errorHandler 兜不到（header 已发）——服务端必须自己留全量痕迹。
+        logger.error({ err, executionId: ctx.executionId, agentId: agent.id }, 'invoke stream failed');
         stream.send({ type: 'error', message: err.message || 'invoke failed', ts: nowIso() });
     } finally {
         stream.close();

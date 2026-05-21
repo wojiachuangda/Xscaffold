@@ -283,3 +283,19 @@ dependencies:    { prod:158, dev:645, optional:2, peer:1, total:802 }
 
 ### 9.3 评级
 **CRITICAL: 0 | HIGH: 0 | MEDIUM: 2 | INFO: 2**（SSE 流式脱敏 INFO 项随 V2.2 实装关闭）
+
+### 9.4 V2.2 SSE 审核修复（Tier 1 #1，2026-05-21）
+
+并行 code-review + security-review 后落地的修复（PLAN：`docs/planning/PLAN_V2.2-REVIEW-FIX.md`）：
+
+- **vendored DOMPurify 3.2.4 → 3.4.5**：`WEBUI/vendor/dompurify.es.mjs` 是渲染 LLM 输出的唯一 XSS 闸门（`WEBUI/lib/markdown.js` 默认配置 `sanitize`）。3.2.4 命中 3 条**默认配置**即触发的 XSS/mXSS（`GHSA-v8jm-5vwx-cfxm` <3.2.7 / `GHSA-h8r8-wccr-v5f2` <3.3.2 / `GHSA-v2wj-7wpq-c8vv`），升 3.4.5 一次清掉全部（含配置依赖项 < 3.4.0）。其余 advisory 依赖未使用的配置项（ADD_TAGS/USE_PROFILES 等），不适用。
+  - **完整性登记（SRI 债）**：当前无构建期 SRI 校验链。锁定 sha256 = `061af0c7e4c28953b421c26d160418c16b695187c8116456a1315dda4fa26e6e`（dompurify 3.4.5 ESM）。升级该 vendor 文件时须同步核对/更新此值。构建期自动校验留 backlog。
+  - marked 保持 15.0.7（输出已被 DOMPurify 兜底，15→18 大版本跳跃徒增回归面）。
+- **error 事件服务端留痕**：流式 invoke 出错时全局 JSON errorHandler 兜不到（header 已发）。`agentManager/agentController.js` catch 内新增 `logger.error({ err, executionId, agentId })`（经 pino redact）。客户端仍收 `err.message`——个人单用户应用，错误进开发者自己浏览器，隐藏只损调试；多用户化时再切通用消息。
+- **代理 / 客户端流生命周期硬化**：`WEBUI/server.js` 代理对上游 `Readable.fromWeb` 加 `on('error')` + 客户端断连 `destroy` 上游（防裸崩 + 防 socket 泄漏）；`WEBUI/lib/sseClient.js` `consume()` 非正常排空时 `reader.cancel()` 释放底层网络流。
+
+**评估为超范围（个人应用「不考虑风控」裁定，仅登记不修）**：
+
+- agent invoke 无 per-agent 授权（任何 authed 用户可调任何 agent）——`AUTH_DISABLED` + 单用户
+- WEBUI dev 代理转发全部 header——dev-only 工具、localhost
+- 断连不中止 agent loop（`sse.js:49`）——**故意**：IOOR「凡动必留痕」优先于 abort

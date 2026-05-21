@@ -35,6 +35,7 @@ async function consume(stream, handlers) {
     const reader = stream.getReader();
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
+    let drained = false;
     try {
         for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
             buffer += decoder.decode(chunk.value, { stream: true });
@@ -48,7 +49,12 @@ async function consume(stream, handlers) {
         if (buffer.trim()) {
             dispatchBlock(buffer, handlers);
         }
+        drained = true;
     } finally {
+        // handler 抛错 / read 出错时流未排空——主动 cancel 释放底层网络流，否则泄漏。
+        if (!drained) {
+            await reader.cancel().catch(() => {});
+        }
         try {
             reader.releaseLock();
         } catch (_err) {
