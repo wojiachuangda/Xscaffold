@@ -78,7 +78,7 @@ curl http://localhost:3000/healthz
 # 拉取 metrics
 curl http://localhost:3000/metrics
 
-# 创建 Agent（需先生成 JWT，参考 docs/api.md）
+# 创建 Agent（需先生成 JWT，参考 docs/BACKEND-API.md）
 curl -X POST http://localhost:3000/agents \
   -H "Authorization: Bearer <your-jwt>" \
   -H "Content-Type: application/json" \
@@ -157,7 +157,7 @@ src/
 | [PRD](docs/planning/PRD.md) | 产品需求文档 |
 | [架构](docs/planning/architecture.md) | 系统架构 + 目录设计 + AA-SEAC 映射 |
 | [任务拆解](docs/planning/task_list.md) | 6 阶段 43 任务清单 |
-| [API 参考](docs/api.md) | 完整 REST 端点 |
+| [后端 API 与能力](docs/BACKEND-API.md) | REST 端点分域 + 底层引擎能力 + UI 接入现状 |
 | [插件开发](docs/plugin-dev.md) | 第三方工具集成 |
 | [安全审计](docs/security/SECURITY_AUDIT.md) | OWASP Top 10 + AA-SEAC 合规 |
 | [性能报告](docs/performance/PERFORMANCE_REPORT.md) | 压测基线 |
