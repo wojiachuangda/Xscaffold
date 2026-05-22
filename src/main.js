@@ -4,12 +4,30 @@
 require('dotenv').config();
 
 const { createApp } = require('./apiGateway/server');
+const { migrate } = require('./infrastructure/database/migrate');
 const { logger } = require('./observability/logger');
 
 const PORT = Number(process.env.PORT) || 3000;
 const SHUTDOWN_HARD_TIMEOUT_MS = 10000;
 
-function start() {
+/**
+ * 启动前自动应用 pending 迁移——避免拉取新迁移后 schema 落后于代码导致运行期报错。
+ * 默认开启；`DB_AUTO_MIGRATE=false` 可关（如生产走独立迁移流水线）。失败即 fail-fast，
+ * 不带残缺 schema 起服务（迁移用同一 getDb() 单例，与后续 createApp 共用连接）。
+ */
+async function runStartupMigrations() {
+    if (process.env.DB_AUTO_MIGRATE === 'false') {
+        logger.info({}, 'startup auto-migrate 跳过 (DB_AUTO_MIGRATE=false)');
+        return;
+    }
+    const { applied } = await migrate();
+    if (applied.length > 0) {
+        logger.info({ applied }, 'startup migrations applied');
+    }
+}
+
+async function start() {
+    await runStartupMigrations();
     const app = createApp();
     const server = app.listen(PORT, () => {
         logger.info({ port: PORT, env: process.env.NODE_ENV || 'development' }, 'server started');
@@ -82,7 +100,10 @@ function flushLogger(timeoutMs) {
 }
 
 if (require.main === module) {
-    start();
+    start().catch((err) => {
+        logger.error({ err: err.message }, 'startup failed');
+        process.exit(1);
+    });
 }
 
 module.exports = { start };
